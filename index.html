@@ -3,12 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gerador de Etiquetas de Localização</title>
+    <title>Gerador de Etiquetas</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Bibliotecas de Alta Compatibilidade -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        window.fb = { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, onSnapshot };
+    </script>
+
     <style>
         .label-preview {
             background: white;
@@ -43,24 +53,11 @@
             border: 1px dashed #cbd5e1;
             position: relative;
         }
-        .selection-list-item:hover {
-            background-color: #f8fafc;
-        }
-        #letterRulesContainer::-webkit-scrollbar, 
-        #labelsChecklist::-webkit-scrollbar {
-            width: 4px;
-        }
-        #letterRulesContainer::-webkit-scrollbar-thumb,
-        #labelsChecklist::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
-            border-radius: 10px;
-        }
         .mode-btn.active {
             background-color: #2563eb;
             color: white;
             border-color: #2563eb;
         }
-        /* Estilos para o Modal de Impressão Interno */
         #printModal {
             display: none;
             position: fixed;
@@ -72,18 +69,18 @@
             justify-content: center;
             padding: 1rem;
         }
-        #printModal.active {
-            display: flex;
-        }
-        /* Ajuste de toque para Mobile */
+        #printModal.active { display: flex; }
+        
+        .toggle-checkbox:checked + .toggle-label { background-color: #2563eb; }
+        .toggle-checkbox:checked + .toggle-label .toggle-dot { transform: translateX(100%); }
+
+        #labelsChecklist::-webkit-scrollbar, 
+        #letterRulesContainer::-webkit-scrollbar { width: 4px; }
+        #labelsChecklist::-webkit-scrollbar-thumb,
+        #letterRulesContainer::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+
         @media (max-width: 768px) {
-            .selection-list-item {
-                padding: 12px 8px; /* Maior área de toque */
-            }
-            .sticky-preview {
-                position: relative !important;
-                top: 0 !important;
-            }
+            .sticky-preview { position: relative !important; top: 0 !important; }
         }
     </style>
 </head>
@@ -92,19 +89,17 @@
     <div class="max-w-6xl mx-auto py-8 px-4">
         <header class="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-                <h1 class="text-2xl md:text-3xl font-bold text-slate-900 font-sans">Gerador de Etiquetas GLP</h1>
-                <p class="text-slate-600 font-sans text-sm">v8.4: Otimização Mobile e Escala Dinâmica.</p>
+                <h1 class="text-2xl md:text-3xl font-bold text-slate-900 font-sans">Gerador de Etiquetas LPNs</h1>
+                <p class="text-slate-600 font-sans text-sm">v9.7: Controlo de Range e Persistência.</p>
             </div>
-            <div class="text-[10px] bg-indigo-700 text-white px-4 py-1.5 rounded-full font-bold uppercase tracking-widest shadow-sm">
-                v8.4 - Mobile Ready
+            <div id="lastLpnBadge" class="hidden text-[10px] bg-indigo-700 text-white px-4 py-1.5 rounded-full font-bold uppercase tracking-widest shadow-sm">
+                Último Gerado: <span id="lastLpnValue">---</span>
             </div>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-3 gap-8 font-sans">
             
-            <!-- Coluna 1: Painel Lateral de Configurações -->
             <div class="lg:col-span-1 space-y-6">
-                
                 <!-- Passo 1: Modo de Entrada -->
                 <section class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
                     <h2 class="text-lg font-bold mb-4 flex items-center text-slate-900">
@@ -112,86 +107,83 @@
                     </h2>
                     
                     <div class="flex p-1 bg-slate-100 rounded-xl mb-4">
-                        <button id="btnModeFile" class="mode-btn active flex-1 py-2 text-xs font-bold rounded-lg transition-all border border-transparent">FICHEIRO</button>
+                        <button id="btnModeRange" class="mode-btn active flex-1 py-2 text-xs font-bold rounded-lg transition-all border border-transparent">SEQUENCIAL</button>
                         <button id="btnModeManual" class="mode-btn flex-1 py-2 text-xs font-bold rounded-lg transition-all border border-transparent">MANUAL</button>
                     </div>
 
-                    <div id="fileInputContainer" class="space-y-4">
-                        <label class="group block border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer relative">
-                            <div class="text-slate-400 group-hover:text-blue-500 mb-2 transition-colors">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="w-10 h-10 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13l3-3m0 0l3 3m-3-3v12m-9-4a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                    <div id="rangeInputContainer" class="space-y-4">
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest flex justify-between">
+                                Descrição (Prefixo)
+                                <span id="lastRangeInfo" class="text-indigo-600 font-black lowercase italic"></span>
+                            </label>
+                            <input type="text" id="rangePrefix" placeholder="Ex: LPN-" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Início (Nº)</label>
+                                <input type="number" id="rangeStart" placeholder="1000" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
                             </div>
-                            <span class="text-sm font-semibold text-slate-700 block text-center">Selecionar Excel / CSV</span>
-                            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" class="hidden"/>
-                        </label>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Fim (Nº)</label>
+                                <input type="number" id="rangeEnd" placeholder="2000" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                            </div>
+                        </div>
+
+                        <div class="bg-blue-50 p-3 rounded-xl border border-blue-100">
+                            <label class="flex items-center cursor-pointer select-none">
+                                <div class="relative">
+                                    <input type="checkbox" id="allowRepetition" class="toggle-checkbox hidden">
+                                    <div class="toggle-label block w-10 h-6 bg-slate-300 rounded-full transition-colors relative">
+                                        <div class="toggle-dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"></div>
+                                    </div>
+                                </div>
+                                <div class="ml-3">
+                                    <p class="text-[11px] font-black text-blue-900 uppercase">Permitir Repetição</p>
+                                    <p class="text-[9px] text-blue-700 italic">Ignorar histórico de numeração</p>
+                                </div>
+                            </label>
+                        </div>
                     </div>
 
                     <div id="manualInputContainer" class="hidden space-y-4">
                         <div>
-                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Descrição da Etiqueta</label>
-                            <input type="text" id="manualText" placeholder="Ex: A.001" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold text-slate-900">
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Descrição</label>
+                            <input type="text" id="manualText" placeholder="Ex: A.001" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Quantidade</label>
-                            <input type="number" id="manualQty" value="1" min="1" inputmode="numeric" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold text-slate-900">
+                            <input type="number" id="manualQty" value="1" min="1" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
                         </div>
-                    </div>
-
-                    <div id="fileLoader" class="hidden absolute inset-0 bg-white/90 z-20 flex flex-col items-center justify-center">
-                        <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
-                        <p class="text-xs font-black text-blue-800 uppercase tracking-tighter">A ler dados...</p>
                     </div>
                 </section>
 
-                <!-- Passo 2: Seleção e Procura -->
+                <!-- Passo 2: Configurar Dados -->
                 <section id="selectionSection" class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 disabled-section transition-all duration-500">
                     <h2 class="text-lg font-bold mb-4 flex items-center text-slate-900">
-                        <span class="step-number">2</span> Configurar Dados
+                        <span class="step-number">2</span> Dados Gerados
                     </h2>
                     <div class="space-y-4">
-                        <div id="colSelectWrapper">
-                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Coluna de Endereço</label>
-                            <select id="columnSelect" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-blue-50 font-bold text-blue-900"></select>
-                        </div>
-
-                        <div>
-                            <label class="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-widest">Modo de Impressão</label>
-                            <div class="flex gap-4">
-                                <label class="flex items-center text-sm font-semibold cursor-pointer">
-                                    <input type="radio" name="printMode" value="all" checked class="mr-2 w-4 h-4"> Tudo
-                                </label>
-                                <label class="flex items-center text-sm font-semibold cursor-pointer">
-                                    <input type="radio" name="printMode" value="selective" class="mr-2 w-4 h-4"> Seleção
-                                </label>
+                        <div class="flex justify-between items-center mb-1">
+                            <p id="sampleCounter" class="text-[10px] font-bold text-blue-600 uppercase">0 etiquetas prontas</p>
+                            <div class="flex gap-3">
+                                <button id="selectAllBtn" class="text-[10px] text-blue-600 font-black uppercase hover:underline">Tudo</button>
+                                <button id="deselectAllBtn" class="text-[10px] text-red-600 font-black uppercase hover:underline">Limpar</button>
                             </div>
                         </div>
-                        
-                        <div id="manualSelectionContainer" class="hidden space-y-3">
-                            <div class="relative">
-                                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                                </div>
-                                <input type="text" id="searchInput" placeholder="Pesquisar localização..." class="w-full pl-10 pr-2 py-3 text-sm border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all font-medium">
-                            </div>
 
-                            <div class="flex justify-between items-center px-1">
-                                <span class="text-[10px] font-bold text-slate-400 uppercase">Lista de Etiquetas</span>
-                                <div class="flex gap-4">
-                                    <button id="selectAllBtn" class="text-[10px] text-blue-600 font-bold hover:underline uppercase">Tudo</button>
-                                    <button id="deselectAllBtn" class="text-[10px] text-red-600 font-bold hover:underline uppercase">Limpar</button>
-                                </div>
-                            </div>
-                            <div id="labelsChecklist" class="max-h-60 overflow-y-auto border border-slate-200 rounded-lg p-1 bg-slate-50 space-y-1 font-mono text-sm"></div>
+                        <div class="relative">
+                            <input type="text" id="searchInput" placeholder="Pesquisar etiqueta..." class="w-full pl-3 pr-3 py-2 text-xs border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-medium">
                         </div>
 
-                        <div id="samplePreviewContainer" class="bg-slate-50 p-4 rounded-xl border border-slate-100">
-                            <p id="sampleCounter" class="text-[10px] font-bold text-blue-600 uppercase">0 itens carregados</p>
-                            <ul id="dataSampleList" class="text-xs space-y-1 text-slate-600 list-disc list-inside mt-2"></ul>
+                        <div id="labelsChecklist" class="max-h-48 overflow-y-auto border border-slate-200 rounded-lg p-1 bg-slate-50 space-y-1 font-mono text-xs">
+                            <!-- Lista gerada dinamicamente -->
                         </div>
                     </div>
                 </section>
 
-                <!-- Passo 3: Layout e Ações -->
+                <!-- Passo 3: Layout e Ação -->
                 <section id="configSection" class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 disabled-section transition-all duration-500">
                     <h2 class="text-lg font-bold mb-4 flex items-center text-slate-900">
                         <span class="step-number">3</span> Layout e Ação
@@ -199,54 +191,35 @@
                     <div class="space-y-4">
                         <div class="grid grid-cols-2 gap-3 pb-2 border-b border-slate-100">
                             <div>
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Etiqueta L (mm)</label>
-                                <input type="number" id="labelWidth" value="100" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase">Etiqueta L (mm)</label>
+                                <input type="number" id="labelWidth" value="100" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
                             </div>
                             <div>
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Etiqueta A (mm)</label>
-                                <input type="number" id="labelHeight" value="50" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase">Etiqueta A (mm)</label>
+                                <input type="number" id="labelHeight" value="50" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
                             </div>
                         </div>
 
                         <div class="grid grid-cols-2 gap-3 pb-2 border-b border-slate-100">
                             <div>
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter text-blue-600">Disposição</label>
-                                <select id="textPosition" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-blue-50">
-                                    <option value="bottom">Vertical (QR acima)</option>
-                                    <option value="right">Horizontal (QR à esquerda)</option>
-                                </select>
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase">Tam. QR (mm)</label>
+                                <input type="number" id="qrSizeInput" value="30" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
                             </div>
                             <div>
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Margem Geral (mm)</label>
-                                <input type="number" id="labelMargin" value="3" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
+                                <label class="block text-[10px] font-bold text-slate-500 uppercase">Fonte Máx</label>
+                                <input type="number" id="maxFontSize" value="100" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
                             </div>
                         </div>
 
-                        <div class="bg-slate-50 p-3 rounded-xl space-y-3 border border-slate-200">
-                            <p class="text-[10px] font-black text-slate-700 uppercase">QR e Texto</p>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Tam. QR (mm)</label>
-                                    <input type="number" id="qrSizeInput" value="30" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
-                                </div>
-                                <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Fonte Máx (pt)</label>
-                                    <input type="number" id="maxFontSize" value="100" inputmode="numeric" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
-                                </div>
+                        <!-- Configurações de Margens Restauradas -->
+                        <div class="grid grid-cols-2 gap-3 pb-2 border-b border-slate-100 bg-slate-50 p-2 rounded-lg">
+                            <div>
+                                <label class="block text-[10px] font-bold text-indigo-600 uppercase">Margem Geral (mm)</label>
+                                <input type="number" id="labelMargin" value="3" class="w-full mt-1 p-2 border border-indigo-200 rounded-lg text-sm font-semibold">
                             </div>
-                        </div>
-
-                        <div class="bg-indigo-50 p-3 rounded-xl space-y-3 border border-indigo-200">
-                            <p class="text-[10px] font-black text-indigo-700 uppercase">Espaçamentos</p>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="block text-[10px] font-bold text-indigo-600 uppercase tracking-tighter">QR/Txt (mm)</label>
-                                    <input type="number" id="qrTextGap" value="5" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
-                                </div>
-                                <div>
-                                    <label class="block text-[10px] font-bold text-indigo-600 uppercase tracking-tighter">Txt/Seta (mm)</label>
-                                    <input type="number" id="textArrowGap" value="3" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
-                                </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-indigo-600 uppercase">QR/Texto (mm)</label>
+                                <input type="number" id="qrTextGap" value="5" class="w-full mt-1 p-2 border border-indigo-200 rounded-lg text-sm font-semibold">
                             </div>
                         </div>
 
@@ -254,21 +227,27 @@
                             <p class="text-[10px] font-black text-blue-700 uppercase">Setas</p>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Direção Global</label>
-                                    <select id="arrowType" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Direção Global</label>
+                                    <select id="arrowType" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
                                         <option value="right">Direita</option>
                                         <option value="left">Esquerda</option>
                                         <option value="none" selected>Nenhuma</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Comprim. (mm)</label>
-                                    <input type="number" id="arrowSize" value="15" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Compr. (mm)</label>
+                                    <input type="number" id="arrowSize" value="15" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
                                 </div>
                             </div>
-                            <div>
-                                <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Espessura (mm)</label>
-                                <input type="number" id="arrowThickness" value="1.5" step="0.1" inputmode="decimal" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold">
+                            <div class="grid grid-cols-2 gap-3">
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Espessura (mm)</label>
+                                    <input type="number" id="arrowThickness" value="1.5" step="0.1" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
+                                </div>
+                                <div>
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Txt/Seta (mm)</label>
+                                    <input type="number" id="textArrowGap" value="3" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
+                                </div>
                             </div>
 
                             <div class="mt-2 pt-2 border-t border-blue-200">
@@ -279,7 +258,6 @@
 
                         <div class="grid grid-cols-1 gap-3 mt-4">
                             <button id="printBtn" disabled class="w-full bg-slate-400 text-white font-black py-4 px-6 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-tight hover:scale-[1.02] border-b-4 border-slate-600">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                                 VISUALIZAR IMPRESSÃO
                             </button>
                             <button id="generateBtn" disabled class="w-full bg-slate-400 text-white font-black py-4 px-6 rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 uppercase tracking-tight hover:scale-[1.02] opacity-80">
@@ -296,7 +274,7 @@
                     <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                         <div class="flex justify-between items-center mb-6">
                             <h2 class="text-lg font-bold text-slate-900">Pré-visualização</h2>
-                            <span id="labelDimensions" class="text-[10px] font-mono text-slate-400 uppercase">A aguardar...</span>
+                            <span id="labelDimensions" class="text-[10px] font-mono text-slate-400 uppercase">---</span>
                         </div>
                         <div id="previewWrapper" class="flex justify-center items-center bg-slate-100 p-4 md:p-10 rounded-2xl overflow-hidden min-h-[300px] md:min-h-[450px]">
                             <div id="previewContainer" class="label-preview"></div>
@@ -307,7 +285,7 @@
                         <div class="w-8 h-8 border-4 border-blue-700 border-t-transparent rounded-full animate-spin"></div>
                         <div>
                             <p id="statusTitle" class="font-black text-blue-900 uppercase text-sm">A Processar Documento</p>
-                            <p id="statusMessage" class="text-xs text-blue-700 font-medium italic">Isso pode levar alguns segundos.</p>
+                            <p id="statusMessage" class="text-xs text-blue-700 font-medium italic">Aguarde um momento...</p>
                         </div>
                     </div>
                 </div>
@@ -315,116 +293,72 @@
         </div>
     </div>
 
-    <!-- Modal de Impressão com Iframe Interno -->
+    <!-- Modal de Impressão -->
     <div id="printModal">
         <div class="bg-white w-full h-full max-w-5xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
             <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-                <div class="flex items-center gap-3">
-                    <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                    </div>
-                    <h3 class="font-black text-slate-800 uppercase text-sm">Visualização de Impressão</h3>
-                </div>
-                <button id="closeModalBtn" class="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-xl transition-all uppercase text-[10px] font-bold flex items-center gap-2">
-                    Fechar
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
+                <h3 class="font-black text-slate-800 uppercase text-sm">Visualização de Impressão</h3>
+                <button id="closeModalBtn" class="text-red-600 font-bold text-xs uppercase hover:bg-red-50 p-2 rounded-lg">Fechar</button>
             </div>
-            <div class="flex-grow bg-slate-200 overflow-hidden relative">
-                <iframe id="printFrame" class="w-full h-full border-none" type="application/pdf"></iframe>
-                <div id="mobilePrintOverlay" class="hidden absolute inset-0 bg-white flex flex-col items-center justify-center p-6 text-center">
-                    <div class="w-16 h-16 text-blue-600 mb-4">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    </div>
-                    <p class="font-bold text-slate-800 mb-2 uppercase">Impressão Mobile Detetada</p>
-                    <p class="text-sm text-slate-500 mb-6">Browsers mobile não permitem visualizar PDFs embutidos. Clique abaixo para abrir o documento e imprimir.</p>
-                    <button id="mobilePrintBtn" class="bg-blue-600 text-white font-black py-4 px-8 rounded-xl uppercase text-sm shadow-lg">Abrir Ficheiro PDF</button>
-                </div>
-            </div>
-            <div class="p-3 bg-white border-t border-slate-100 text-center">
-                <p class="text-[9px] text-slate-400 font-medium uppercase tracking-widest">v8.4 - Adaptive Engine</p>
-            </div>
+            <iframe id="printFrame" class="flex-grow w-full h-full border-none"></iframe>
         </div>
     </div>
 
-    <script>
+    <script type="module">
         const { jsPDF } = window.jspdf;
 
+        // --- GESTÃO DE AMBIENTE ---
+        let firebaseConfig = null;
+        try {
+            if (typeof __firebase_config !== 'undefined') {
+                firebaseConfig = JSON.parse(__firebase_config);
+            }
+        } catch (e) { console.warn("Ambiente local detetado."); }
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'lpn-gen-prod';
+        let db, auth, user, lastGeneratedLpn = 0;
+
         // Estado Global
-        let currentMode = 'file'; 
-        let workbook = null;
-        let sheetDataRaw = [];
+        let currentMode = 'range';
         let cleanAddresses = [];
-        let selectedColName = '';
         let selectedIndices = new Set();
-        let lastBlobUrl = null;
         
+        // Regras de Letras
         const letterRules = {};
         "ABCDEFGH".split('').forEach(l => {
             letterRules[l] = { odd: 'global', even: 'global' };
         });
 
-        // UI Selectors
-        const btnModeFile = document.getElementById('btnModeFile');
-        const btnModeManual = document.getElementById('btnModeManual');
-        const fileInputContainer = document.getElementById('fileInputContainer');
-        const manualInputContainer = document.getElementById('manualInputContainer');
-        const colSelectWrapper = document.getElementById('colSelectWrapper');
-        const manualText = document.getElementById('manualText');
-        const manualQty = document.getElementById('manualQty');
-        const fileInput = document.getElementById('fileInput');
-        const fileLoader = document.getElementById('fileLoader');
-        const selectionSection = document.getElementById('selectionSection');
-        const configSection = document.getElementById('configSection');
-        const columnSelect = document.getElementById('columnSelect');
-        const dataSampleList = document.getElementById('dataSampleList');
-        const sampleCounter = document.getElementById('sampleCounter');
-        const previewContainer = document.getElementById('previewContainer');
-        const previewWrapper = document.getElementById('previewWrapper');
+        // Selectores
+        const rangePrefix = document.getElementById('rangePrefix');
+        const rangeStart = document.getElementById('rangeStart');
+        const rangeEnd = document.getElementById('rangeEnd');
+        const allowRepetition = document.getElementById('allowRepetition');
         const generateBtn = document.getElementById('generateBtn');
         const printBtn = document.getElementById('printBtn');
+        const previewContainer = document.getElementById('previewContainer');
+        const previewWrapper = document.getElementById('previewWrapper');
+        const labelsChecklist = document.getElementById('labelsChecklist');
+        const searchInput = document.getElementById('searchInput');
+        const selectAllBtn = document.getElementById('selectAllBtn');
+        const deselectAllBtn = document.getElementById('deselectAllBtn');
         const statusBox = document.getElementById('statusBox');
         const statusMessage = document.getElementById('statusMessage');
         const letterRulesContainer = document.getElementById('letterRulesContainer');
-        const manualSelectionContainer = document.getElementById('manualSelectionContainer');
-        const labelsChecklist = document.getElementById('labelsChecklist');
-        const searchInput = document.getElementById('searchInput');
-        const printModeRadios = document.getElementsByName('printMode');
-        const selectAllBtn = document.getElementById('selectAllBtn');
-        const deselectAllBtn = document.getElementById('deselectAllBtn');
-        const inputWidth = document.getElementById('labelWidth');
-        const inputHeight = document.getElementById('labelHeight');
-        const qrSizeInput = document.getElementById('qrSizeInput');
-        const labelMargin = document.getElementById('labelMargin');
-        const qrTextGap = document.getElementById('qrTextGap');
-        const maxFontSize = document.getElementById('maxFontSize');
-        const textPosition = document.getElementById('textPosition');
-        const arrowType = document.getElementById('arrowType');
-        const arrowSize = document.getElementById('arrowSize');
-        const arrowThickness = document.getElementById('arrowThickness');
-        const textArrowGap = document.getElementById('textArrowGap');
+        const lastRangeInfo = document.getElementById('lastRangeInfo');
 
-        // Modal Selectors
-        const printModal = document.getElementById('printModal');
-        const printFrame = document.getElementById('printFrame');
-        const closeModalBtn = document.getElementById('closeModalBtn');
-        const mobilePrintOverlay = document.getElementById('mobilePrintOverlay');
-        const mobilePrintBtn = document.getElementById('mobilePrintBtn');
-
-        // Detetar Mobile
-        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
+        // Inicialização UI Regras
         function initLetterRulesUI() {
             if(!letterRulesContainer) return;
             letterRulesContainer.innerHTML = "ABCDEFGH".split('').map(l => `
-                <div class="bg-white p-2 rounded border border-blue-100">
+                <div class="bg-white p-2 rounded border border-blue-100 shadow-sm">
                     <div class="flex items-center justify-between mb-1">
                         <span class="text-[11px] font-black text-blue-800">Letra ${l}</span>
                     </div>
                     <div class="grid grid-cols-2 gap-2">
                         <div>
                             <label class="text-[8px] uppercase text-slate-400 block font-bold">Ímpar</label>
-                            <select onchange="updateRule('${l}', 'odd', this.value)" class="w-full text-[10px] p-1 border rounded bg-slate-50">
+                            <select onchange="window.updateRule('${l}', 'odd', this.value)" class="w-full text-[10px] p-1 border rounded bg-slate-50 font-bold">
                                 <option value="global">Global</option>
                                 <option value="right">Direita</option>
                                 <option value="left">Esquerda</option>
@@ -433,7 +367,7 @@
                         </div>
                         <div>
                             <label class="text-[8px] uppercase text-slate-400 block font-bold">Par</label>
-                            <select onchange="updateRule('${l}', 'even', this.value)" class="w-full text-[10px] p-1 border rounded bg-slate-50">
+                            <select onchange="window.updateRule('${l}', 'even', this.value)" class="w-full text-[10px] p-1 border rounded bg-slate-50 font-bold">
                                 <option value="global">Global</option>
                                 <option value="right">Direita</option>
                                 <option value="left">Esquerda</option>
@@ -450,184 +384,59 @@
             updatePreview();
         };
 
-        initLetterRulesUI();
+        // Inicialização Firebase
+        async function initFirebase() {
+            if (!firebaseConfig) return;
+            try {
+                const app = window.fb.initializeApp(firebaseConfig);
+                auth = window.fb.getAuth(app);
+                db = window.fb.getFirestore(app);
 
-        btnModeFile.onclick = () => switchMode('file');
-        btnModeManual.onclick = () => switchMode('manual');
-
-        function switchMode(mode) {
-            currentMode = mode;
-            btnModeFile.classList.toggle('active', mode === 'file');
-            btnModeManual.classList.toggle('active', mode === 'manual');
-            fileInputContainer.classList.toggle('hidden', mode === 'manual');
-            manualInputContainer.classList.toggle('hidden', mode === 'file');
-            colSelectWrapper.classList.toggle('hidden', mode === 'manual');
-            
-            if (mode === 'manual') {
-                syncManualData();
-                selectionSection.classList.remove('disabled-section');
-            } else if (!workbook) {
-                selectionSection.classList.add('disabled-section');
-                configSection.classList.add('disabled-section');
-                generateBtn.disabled = true;
-                printBtn.disabled = true;
-            } else {
-                processAddresses();
-            }
-        }
-
-        function syncManualData() {
-            const text = manualText.value.trim() || "A.001";
-            const qty = parseInt(manualQty.value) || 1;
-            cleanAddresses = Array(qty).fill(text);
-            selectedIndices = new Set(cleanAddresses.keys());
-            sampleCounter.textContent = `${cleanAddresses.length} etiquetas geradas`;
-            dataSampleList.innerHTML = `<li>${text} (x${qty})</li>`;
-            
-            configSection.classList.remove('disabled-section');
-            generateBtn.disabled = false;
-            printBtn.disabled = false;
-            generateBtn.classList.replace('bg-slate-400', 'bg-slate-600');
-            printBtn.classList.replace('bg-slate-400', 'bg-blue-600');
-            
-            if (document.querySelector('input[name="printMode"]:checked').value === 'selective') {
-                renderChecklist(searchInput.value);
-            }
-            updatePreview();
-        }
-
-        if(manualText) manualText.addEventListener('input', syncManualData);
-        if(manualQty) manualQty.addEventListener('input', syncManualData);
-
-        const configInputs = [inputWidth, inputHeight, qrSizeInput, labelMargin, qrTextGap, maxFontSize, textPosition, arrowType, arrowSize, arrowThickness, textArrowGap];
-        configInputs.forEach(el => {
-            if (el) el.addEventListener('input', updatePreview);
-        });
-
-        // Evento de redimensionamento para ajustar escala da prévia
-        window.addEventListener('resize', updatePreview);
-
-        fileInput.addEventListener('change', handleSafeUpload);
-        generateBtn.addEventListener('click', () => processOutput('download'));
-        printBtn.addEventListener('click', () => processOutput('print'));
-        
-        closeModalBtn.onclick = () => {
-            printModal.classList.remove('active');
-            if (lastBlobUrl) {
-                URL.revokeObjectURL(lastBlobUrl);
-                lastBlobUrl = null;
-            }
-            printFrame.src = ""; 
-        };
-
-        mobilePrintBtn.onclick = () => {
-            if(lastBlobUrl) window.open(lastBlobUrl, '_blank');
-        };
-
-        printModeRadios.forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                manualSelectionContainer.classList.toggle('hidden', e.target.value !== 'selective');
-                if (e.target.value === 'selective') renderChecklist();
-                updatePreview();
-            });
-        });
-
-        searchInput.addEventListener('input', () => renderChecklist(searchInput.value));
-
-        selectAllBtn.onclick = (e) => {
-            e.preventDefault();
-            selectedIndices = new Set(cleanAddresses.keys());
-            renderChecklist(searchInput.value);
-            updatePreview();
-        };
-
-        deselectAllBtn.onclick = (e) => {
-            e.preventDefault();
-            selectedIndices.clear();
-            renderChecklist(searchInput.value);
-            updatePreview();
-        };
-
-        async function handleSafeUpload(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            fileLoader.classList.remove('hidden');
-            const reader = new FileReader();
-            reader.onload = function(evt) {
-                try {
-                    workbook = XLSX.read(evt.target.result, { type: 'binary', cellDates: true });
-                    onWorkbookReady();
-                } catch (err) {
-                    fileLoader.classList.add('hidden');
-                    alert("Erro ao ler o ficheiro.");
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await window.fb.signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await window.fb.signInAnonymously(auth);
                 }
-            };
-            reader.readAsBinaryString(file);
+
+                window.fb.onAuthStateChanged(auth, (u) => {
+                    user = u;
+                    if (user) setupDataSync();
+                });
+            } catch (err) { console.error("Erro Firebase:", err); }
         }
 
-        function onWorkbookReady() {
-            fileLoader.classList.add('hidden');
-            selectionSection.classList.remove('disabled-section');
-            const ws = workbook.Sheets[workbook.SheetNames[0]];
-            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-            if (rows.length === 0) return;
-            let headerIdx = 0;
-            while (headerIdx < rows.length && rows[headerIdx].every(c => String(c).trim() === "")) headerIdx++;
-            const headers = rows[headerIdx].map((h, i) => String(h || "").trim() || `COLUNA_${i+1}`);
-            columnSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
-            sheetDataRaw = rows.slice(headerIdx + 1).map(row => {
-                const obj = {};
-                headers.forEach((h, idx) => obj[h] = row[idx]);
-                return obj;
-            });
-            const target = headers.find(h => ["LOC", "LOCAL", "ENDEREÇO", "ADDRESS"].includes(h.toUpperCase().trim()));
-            columnSelect.value = target || headers[1] || headers[0];
-            processAddresses();
+        function setupDataSync() {
+            if (!db) return;
+            const settingsDoc = window.fb.doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
+            window.fb.onSnapshot(settingsDoc, (snapshot) => {
+                if (snapshot.exists()) {
+                    const data = snapshot.data();
+                    lastGeneratedLpn = data.last_lpn || 0;
+                    const lastRange = data.last_range || "";
+                    
+                    const badgeVal = document.getElementById('lastLpnValue');
+                    if(badgeVal) badgeVal.textContent = lastGeneratedLpn;
+                    document.getElementById('lastLpnBadge')?.classList.remove('hidden');
+                    
+                    if (lastRangeInfo) {
+                        lastRangeInfo.textContent = lastRange ? `(última: ${lastRange})` : "";
+                    }
+
+                    syncData(); 
+                }
+            }, (err) => console.warn("Firestore Sync Error:", err));
         }
 
-        columnSelect.addEventListener('change', processAddresses);
-
-        function processAddresses() {
-            if (currentMode === 'manual') return;
-            selectedColName = columnSelect.value;
-            cleanAddresses = sheetDataRaw.map(row => String(row[selectedColName] || "").trim()).filter(val => val !== "");
-            selectedIndices = new Set(cleanAddresses.keys());
-            sampleCounter.textContent = `${cleanAddresses.length} etiquetas encontradas`;
-            dataSampleList.innerHTML = cleanAddresses.slice(0, 3).map(a => `<li>${a}</li>`).join('');
-            configSection.classList.remove('disabled-section');
-            generateBtn.disabled = false;
-            printBtn.disabled = false;
-            generateBtn.classList.replace('bg-slate-400', 'bg-slate-600');
-            printBtn.classList.replace('bg-slate-400', 'bg-blue-600');
-            if (document.querySelector('input[name="printMode"]:checked').value === 'selective') {
-                renderChecklist(searchInput.value);
-            }
-            updatePreview();
+        async function updateLastLpn(val, rangeStr) {
+            if (!user || !db || val <= lastGeneratedLpn) return;
+            const settingsDoc = window.fb.doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
+            await window.fb.setDoc(settingsDoc, { last_lpn: val, last_range: rangeStr }, { merge: true });
         }
 
-        function renderChecklist(filter = "") {
-            const term = filter.toLowerCase().trim();
-            labelsChecklist.innerHTML = cleanAddresses
-                .map((addr, idx) => ({ addr, idx }))
-                .filter(item => item.addr.toLowerCase().includes(term))
-                .map(item => `
-                <div class="flex items-center p-2 border-b border-slate-100 selection-list-item cursor-pointer" onclick="toggleIdx(${item.idx})">
-                    <input type="checkbox" class="mr-3 w-5 h-5 pointer-events-none" ${selectedIndices.has(item.idx)?'checked':''}>
-                    <span class="truncate pointer-events-none font-bold text-slate-800">${item.addr}</span>
-                </div>
-            `).join('');
-        }
-
-        window.toggleIdx = (idx) => {
-            if (selectedIndices.has(idx)) selectedIndices.delete(idx);
-            else selectedIndices.add(idx);
-            renderChecklist(searchInput.value);
-            updatePreview();
-        };
-
+        // Determinação de direção de seta com base em regras
         function resolveArrowDirection(addr) {
             if (!addr) return 'none';
-            const firstChar = addr[0].toUpperCase();
+            const firstChar = addr.charAt(0).toUpperCase();
             const numbers = addr.match(/\d+/g);
             const levelNum = numbers ? parseInt(numbers[0]) : 0; 
             const isOdd = levelNum % 2 !== 0;
@@ -636,39 +445,161 @@
                 const rule = isOdd ? letterRules[firstChar].odd : letterRules[firstChar].even;
                 if (rule !== 'global') return rule;
             }
-            return arrowType.value;
+            return document.getElementById('arrowType').value;
+        }
+
+        // Lógica de Sincronização
+        function syncData() {
+            let isValid = false;
+            let sequenceError = false;
+            const oldLength = cleanAddresses.length;
+
+            if (currentMode === 'range') {
+                const prefix = rangePrefix.value.trim();
+                const start = parseInt(rangeStart.value);
+                const end = parseInt(rangeEnd.value);
+                const repeat = allowRepetition.checked;
+
+                if (!isNaN(start) && !isNaN(end) && start <= end) {
+                    isValid = true;
+                    if (db && !repeat && start <= lastGeneratedLpn) {
+                        sequenceError = true;
+                    }
+                    cleanAddresses = Array.from({ length: end - start + 1 }, (_, i) => String(prefix + (start + i)));
+                } else {
+                    cleanAddresses = [];
+                }
+            } else {
+                const text = document.getElementById('manualText').value.trim() || "A.001";
+                const qty = parseInt(document.getElementById('manualQty').value) || 1;
+                cleanAddresses = Array(qty).fill(text);
+                isValid = true; 
+            }
+
+            if (isValid && cleanAddresses.length > 0) {
+                if (cleanAddresses.length !== oldLength || currentMode === 'manual') {
+                    selectedIndices = new Set(cleanAddresses.keys());
+                }
+                
+                document.getElementById('sampleCounter').textContent = `${cleanAddresses.length} etiquetas geradas`;
+                document.getElementById('selectionSection').classList.remove('disabled-section');
+                document.getElementById('configSection').classList.remove('disabled-section');
+                
+                renderChecklist();
+
+                if (!sequenceError) {
+                    enableActions();
+                } else {
+                    disableActionsOnly();
+                    if (rangeStart.value !== "") {
+                        showFeedback(`Não é permitido repetir. (Início ${rangeStart.value} já gerado)`, "error");
+                    }
+                }
+                updatePreview();
+            } else {
+                disableAll();
+            }
+        }
+
+        function renderChecklist() {
+            const filter = searchInput.value.toLowerCase();
+            labelsChecklist.innerHTML = cleanAddresses
+                .map((addr, idx) => ({ addr, idx }))
+                .filter(item => item.addr.toLowerCase().includes(filter))
+                .map(item => `
+                    <div class="flex items-center p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors" onclick="window.toggleLabelIdx(${item.idx})">
+                        <input type="checkbox" class="mr-3 w-4 h-4 pointer-events-none" ${selectedIndices.has(item.idx) ? 'checked' : ''}>
+                        <span class="truncate font-bold text-slate-700">${item.addr}</span>
+                    </div>
+                `).join('');
+            
+            const count = selectedIndices.size;
+            document.getElementById('sampleCounter').textContent = `${count} de ${cleanAddresses.length} selecionadas`;
+            
+            if (count === 0) disableActionsOnly();
+            else if (isValidCurrentState()) enableActions();
+        }
+
+        function isValidCurrentState() {
+            if (currentMode === 'manual') return true;
+            const start = parseInt(rangeStart.value);
+            return !isNaN(start) && (allowRepetition.checked || !db || start > lastGeneratedLpn);
+        }
+
+        window.toggleLabelIdx = (idx) => {
+            if (selectedIndices.has(idx)) selectedIndices.delete(idx);
+            else selectedIndices.add(idx);
+            renderChecklist();
+            updatePreview();
+        };
+
+        selectAllBtn.onclick = () => {
+            selectedIndices = new Set(cleanAddresses.keys());
+            renderChecklist();
+            updatePreview();
+        };
+
+        deselectAllBtn.onclick = () => {
+            selectedIndices.clear();
+            renderChecklist();
+            updatePreview();
+        };
+
+        searchInput.oninput = renderChecklist;
+
+        function enableActions() {
+            if (selectedIndices.size === 0) return;
+            generateBtn.disabled = false; printBtn.disabled = false;
+            generateBtn.classList.replace('bg-slate-400', 'bg-slate-600');
+            printBtn.classList.replace('bg-slate-400', 'bg-blue-600');
+        }
+
+        function disableActionsOnly() {
+            generateBtn.disabled = true; printBtn.disabled = true;
+            generateBtn.classList.replace('bg-slate-600', 'bg-slate-400');
+            printBtn.classList.replace('bg-blue-600', 'bg-slate-400');
+        }
+
+        function disableAll() {
+            disableActionsOnly();
+            document.getElementById('selectionSection').classList.add('disabled-section');
+            document.getElementById('configSection').classList.add('disabled-section');
+            labelsChecklist.innerHTML = "";
+        }
+
+        function showFeedback(msg, type) {
+            const old = document.querySelector('.feedback-banner');
+            if (old) old.remove();
+            const b = document.createElement('div');
+            b.className = `feedback-banner fixed top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white font-bold text-xs shadow-2xl z-[100] transition-all ${type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`;
+            b.textContent = msg;
+            document.body.appendChild(b);
+            setTimeout(() => { if(b.parentNode) b.remove(); }, 3000);
         }
 
         function updatePreview() {
-            if (cleanAddresses.length === 0) return;
-            const isSelective = document.querySelector('input[name="printMode"]:checked').value === 'selective';
-            const sortedIndices = Array.from(selectedIndices).sort((a,b)=>a-b);
-            const firstIdx = isSelective ? sortedIndices[0] : 0;
-            
-            if (isSelective && selectedIndices.size === 0) {
-                previewContainer.innerHTML = '<p class="text-slate-400 font-bold uppercase text-xs text-center">Nenhuma etiqueta selecionada</p>';
+            if (cleanAddresses.length === 0 || selectedIndices.size === 0) {
+                previewContainer.innerHTML = '<p class="text-slate-300 font-bold uppercase text-[10px]">Sem etiquetas selecionadas</p>';
                 return;
             }
             
-            const addr = cleanAddresses[firstIdx] || "EXEMPLO";
-            const w = parseFloat(inputWidth.value) || 100;
-            const h = parseFloat(inputHeight.value) || 50;
-            const qrS = parseFloat(qrSizeInput.value) || 25;
-            const gap = parseFloat(qrTextGap.value) || 5;
-            const marg = parseFloat(labelMargin.value) || 3;
-            const arrowLen = parseFloat(arrowSize.value) || 10;
-            const arrowThick = parseFloat(arrowThickness ? arrowThickness.value : 1.5) || 1;
-            const textArrGap = parseFloat(textArrowGap.value) || 2;
-            const fs = parseFloat(maxFontSize.value) || 100;
-            const pos = textPosition.value;
+            const firstIdx = Array.from(selectedIndices).sort((a,b)=>a-b)[0];
+            const addr = cleanAddresses[firstIdx];
+            
+            const w = parseFloat(document.getElementById('labelWidth').value) || 100;
+            const h = parseFloat(document.getElementById('labelHeight').value) || 50;
+            const qrS = parseFloat(document.getElementById('qrSizeInput').value) || 30;
+            const marg = parseFloat(document.getElementById('labelMargin').value) || 3;
+            const gap = parseFloat(document.getElementById('qrTextGap').value) || 5;
+            const fs = parseFloat(document.getElementById('maxFontSize').value) || 100;
+            const arrLen = parseFloat(document.getElementById('arrowSize').value) || 15;
+            const arrThick = parseFloat(document.getElementById('arrowThickness').value) || 1.5;
+            const textArrGap = parseFloat(document.getElementById('textArrowGap').value) || 3;
 
             const resolvedDir = resolveArrowDirection(addr);
-            document.getElementById('labelDimensions').textContent = `${w}x${h} mm`;
 
-            // ESCALA DINÂMICA: Ajusta a prévia para caber no ecrã (especialmente mobile)
-            const availableWidth = previewWrapper.clientWidth - 32; // padding do wrapper
-            const baseScale = availableWidth / w;
-            const scale = Math.min(baseScale, 4.5); // Limita zoom excessivo em ecrãs grandes
+            const availableWidth = previewWrapper.clientWidth - 40;
+            const scale = Math.min(availableWidth / w, 4);
 
             previewContainer.style.width = `${w * scale}px`;
             previewContainer.style.height = `${h * scale}px`;
@@ -676,145 +607,137 @@
             previewContainer.innerHTML = '';
 
             const inner = document.createElement('div');
-            inner.style.width = '100%'; inner.style.height = '100%'; inner.style.display = 'flex';
-            inner.style.flexDirection = pos === 'bottom' ? 'column' : 'row';
-            inner.style.alignItems = 'center';
-
-            const qrZone = document.createElement('div');
-            qrZone.className = 'zone-indicator';
-            qrZone.style.width = `${qrS * scale}px`;
-            qrZone.style.height = pos === 'bottom' ? `${qrS * scale}px` : `100%`;
-            qrZone.style.flexShrink = '0';
+            inner.style.cssText = `width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;`;
             
-            const gapZone = document.createElement('div');
-            gapZone.style.width = pos === 'bottom' ? '1px' : `${gap * scale}px`;
-            gapZone.style.height = pos === 'bottom' ? `${gap * scale}px` : '1px';
-            gapZone.style.flexShrink = '0';
+            const qrZone = document.createElement('div');
+            qrZone.className = "zone-indicator";
+            qrZone.style.width = `${qrS * scale}px`;
+            qrZone.style.height = `${qrS * scale}px`;
+            
+            const textContentZone = document.createElement('div');
+            textContentZone.style.cssText = `display:flex; flex-direction:column; align-items:center; justify-content:center; margin-top:${gap * scale}px;`;
 
-            const contentZone = document.createElement('div');
-            contentZone.style.flexGrow = '1'; contentZone.style.width = '100%'; contentZone.style.display = 'flex';
-            contentZone.style.flexDirection = 'column'; contentZone.style.justifyContent = 'center';
-            contentZone.style.alignItems = 'center'; contentZone.className = 'zone-indicator';
-
-            const txt = document.createElement('div');
-            txt.textContent = addr; txt.style.fontSize = `${fs * (scale/4.5)}px`;
-            txt.style.fontWeight = 'bold'; txt.style.textAlign = 'center'; txt.style.lineHeight = '1';
-            contentZone.appendChild(txt);
+            const textZone = document.createElement('div');
+            textZone.style.cssText = `font-weight:bold; text-align:center; font-size:${(fs * scale) / 5}px; line-height:1;`;
+            textZone.textContent = addr;
+            textContentZone.appendChild(textZone);
 
             if (resolvedDir !== 'none') {
-                const arrowSpacer = document.createElement('div'); arrowSpacer.style.height = `${textArrGap * scale}px`;
-                contentZone.appendChild(arrowSpacer);
+                const arrowSpacer = document.createElement('div');
+                arrowSpacer.style.height = `${textArrGap * scale}px`;
+                textContentZone.appendChild(arrowSpacer);
+
                 const arrowSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                arrowSvg.setAttribute("width", (arrowLen * scale).toString());
-                arrowSvg.setAttribute("height", (arrowThick * 8 * scale).toString());
-                const midY = arrowThick * 4 * scale; const headLen = arrowThick * 4 * scale; const headWid = arrowThick * 3 * scale;
+                arrowSvg.setAttribute("width", (arrLen * scale).toString());
+                arrowSvg.setAttribute("height", (arrThick * 6 * scale).toString());
+                const midY = arrThick * 3 * scale;
+                const headSize = arrThick * 3 * scale;
                 const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+
                 if (resolvedDir === 'right') {
-                    line.setAttribute("x1", "0"); line.setAttribute("x2", (arrowLen * scale - headLen).toString());
+                    line.setAttribute("x1", "0");
+                    line.setAttribute("x2", (arrLen * scale - headSize).toString());
+                    head.setAttribute("points", `${arrLen * scale},${midY} ${(arrLen * scale) - headSize},${midY - headSize/1.5} ${(arrLen * scale) - headSize},${midY + headSize/1.5}`);
                 } else {
-                    line.setAttribute("x1", headLen.toString()); line.setAttribute("x2", (arrowLen * scale).toString());
+                    line.setAttribute("x1", headSize.toString());
+                    line.setAttribute("x2", (arrLen * scale).toString());
+                    head.setAttribute("points", `0,${midY} ${headSize},${midY - headSize/1.5} ${headSize},${midY + headSize/1.5}`);
                 }
                 line.setAttribute("y1", midY.toString()); line.setAttribute("y2", midY.toString());
-                line.setAttribute("stroke", "black"); line.setAttribute("stroke-width", (arrowThick * scale).toString());
-                const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-                if (resolvedDir === 'right') head.setAttribute("points", `${(arrowLen * scale)},${midY} ${(arrowLen * scale) - headLen},${midY - headWid} ${(arrowLen * scale) - headLen},${midY + headWid}`);
-                else head.setAttribute("points", `0,${midY} ${headLen},${midY - headWid} ${headLen},${midY + headWid}`);
+                line.setAttribute("stroke", "black"); line.setAttribute("stroke-width", (arrThick * scale).toString());
                 head.setAttribute("fill", "black");
-                arrowSvg.appendChild(line); arrowSvg.appendChild(head); contentZone.appendChild(arrowSvg);
+                arrowSvg.appendChild(line); arrowSvg.appendChild(head);
+                textContentZone.appendChild(arrowSvg);
             }
-            inner.appendChild(qrZone); inner.appendChild(gapZone); inner.appendChild(contentZone);
+
+            inner.appendChild(qrZone);
+            inner.appendChild(textContentZone);
             previewContainer.appendChild(inner);
             new QRCode(qrZone, { text: addr, width: qrS * scale, height: qrS * scale });
+            document.getElementById('labelDimensions').textContent = `${w}x${h} mm`;
         }
 
         async function processOutput(mode) {
-            const isSelective = document.querySelector('input[name="printMode"]:checked').value === 'selective';
-            const targets = isSelective ? Array.from(selectedIndices).sort((a,b)=>a-b).map(i => cleanAddresses[i]) : cleanAddresses;
-            if (targets.length === 0) { alert("Nenhuma etiqueta selecionada."); return; }
-            
+            if (selectedIndices.size === 0) return;
             statusBox.classList.remove('hidden');
-            generateBtn.disabled = true;
-            printBtn.disabled = true;
-
-            const w = parseFloat(inputWidth.value); const h = parseFloat(inputHeight.value);
-            const qrS = parseFloat(qrSizeInput.value); const gap = parseFloat(qrTextGap.value);
-            const marg = parseFloat(labelMargin.value); const fsMax = parseFloat(maxFontSize.value);
-            const arrowLen = parseFloat(arrowSize.value); 
-            const arrowThick = parseFloat(arrowThickness ? arrowThickness.value : 1.5);
-            const textArrGap = parseFloat(textArrowGap.value); const pos = textPosition.value;
+            const w = parseFloat(document.getElementById('labelWidth').value);
+            const h = parseFloat(document.getElementById('labelHeight').value);
+            const qrS = parseFloat(document.getElementById('qrSizeInput').value);
+            const marg = parseFloat(document.getElementById('labelMargin').value);
+            const gap = parseFloat(document.getElementById('qrTextGap').value);
+            const fsMax = parseFloat(document.getElementById('maxFontSize').value);
+            const arrLen = parseFloat(document.getElementById('arrowSize').value);
+            const arrThick = parseFloat(document.getElementById('arrowThickness').value);
+            const textArrGap = parseFloat(document.getElementById('textArrowGap').value);
+            const targets = Array.from(selectedIndices).sort((a,b)=>a-b).map(idx => cleanAddresses[idx]);
 
             try {
-                const doc = new jsPDF({ orientation: w > h ? 'l' : 'p', unit: 'mm', format: [w, h], compress: true });
+                const docPdf = new jsPDF({ orientation: w > h ? 'l' : 'p', unit: 'mm', format: [w, h], compress: true });
                 for (let i = 0; i < targets.length; i++) {
                     const addr = targets[i];
-                    if (i > 0) doc.addPage([w, h], w > h ? 'l' : 'p');
-                    const qrImg = await createQRImage(addr, 500);
-                    let qrX, qrY, contentAreaX, contentAreaY, contentAreaW, contentAreaH;
-
-                    if (pos === 'bottom') {
-                        qrX = (w / 2) - (qrS / 2); qrY = marg;
-                        contentAreaX = marg; contentAreaY = marg + qrS + gap;
-                        contentAreaW = w - (marg * 2); contentAreaH = h - contentAreaY - marg; 
-                    } else {
-                        qrX = marg; qrY = (h / 2) - (qrS / 2);
-                        contentAreaX = marg + qrS + gap; contentAreaY = marg;
-                        contentAreaW = w - contentAreaX - marg; contentAreaH = h - (marg * 2);
-                    }
-                    contentAreaW = Math.max(contentAreaW, 1); contentAreaH = Math.max(contentAreaH, 1);
-                    if (qrImg) doc.addImage(qrImg, 'PNG', qrX, qrY, qrS, qrS, undefined, 'FAST');
-
+                    if (i > 0) docPdf.addPage([w, h], w > h ? 'l' : 'p');
+                    const qrImg = await createQRImage(addr, 400);
+                    const qrY = marg;
+                    if (qrImg) docPdf.addImage(qrImg, 'PNG', (w/2)-(qrS/2), qrY, qrS, qrS);
                     const resolvedDir = resolveArrowDirection(addr);
-                    doc.setFont("Helvetica", "bold"); let fs = fsMax; doc.setFontSize(fs);
-                    let tw = doc.getTextWidth(addr);
-                    if (tw > contentAreaW) { fs = fs * (contentAreaW / tw); doc.setFontSize(fs); }
-                    let th = fs * 0.3527; const arrowPartH = (resolvedDir !== 'none') ? (arrowThick + textArrGap) : 0;
-                    const totalNeededH = th + arrowPartH;
-                    if (totalNeededH > contentAreaH) { const factor = contentAreaH / totalNeededH; fs = fs * factor; doc.setFontSize(fs); th = fs * 0.3527; }
-                    const finalBlockH = th + arrowPartH;
-                    const blockStartY = contentAreaY + (contentAreaH / 2) - (finalBlockH / 2);
-                    const textBaselineY = blockStartY + (th * 0.82); const centerX = contentAreaX + (contentAreaW / 2);
-                    doc.text(addr, centerX, textBaselineY, { align: 'center' });
-
+                    const contentAreaY = qrY + qrS + gap;
+                    const contentAreaH = h - contentAreaY - marg;
+                    docPdf.setFont("Helvetica", "bold");
+                    docPdf.setFontSize(fsMax);
+                    let tw = docPdf.getTextWidth(addr);
+                    let finalFs = fsMax;
+                    if (tw > (w - marg*2)) finalFs *= (w - marg*2) / tw;
+                    let textH = finalFs * 0.3527; 
+                    const arrowSpace = (resolvedDir !== 'none') ? (arrThick + textArrGap) : 0;
+                    const blockH = textH + arrowSpace;
+                    if (blockH > contentAreaH) {
+                        const adjust = contentAreaH / blockH;
+                        finalFs *= adjust;
+                        textH = finalFs * 0.3527;
+                    }
+                    docPdf.setFontSize(finalFs);
+                    const totalH = textH + arrowSpace;
+                    const startY = contentAreaY + (contentAreaH / 2) - (totalH / 2);
+                    docPdf.text(addr, w/2, startY + (textH * 0.85), { align: 'center' });
                     if (resolvedDir !== 'none') {
-                        const arrowY = blockStartY + th + textArrGap + (arrowThick / 2);
-                        const hS = arrowThick * 3; const hW = arrowThick * 1.5;
-                        const lineEndX = centerX + (arrowLen / 2); const lineStartX = centerX - (arrowLen / 2);
-                        doc.setLineWidth(arrowThick); doc.setDrawColor(0, 0, 0); doc.setFillColor(0, 0, 0);
+                        const arrowY = startY + textH + textArrGap + (arrThick / 2);
+                        const centerX = w / 2;
+                        const headL = arrThick * 2.5;
+                        const headW = arrThick * 1.5;
+                        docPdf.setLineWidth(arrThick);
+                        docPdf.setDrawColor(0);
+                        docPdf.setFillColor(0);
                         if (resolvedDir === 'right') {
-                            doc.line(lineStartX, arrowY, lineEndX - hS, arrowY); 
-                            doc.triangle(lineEndX, arrowY, lineEndX - hS, arrowY - hW, lineEndX - hS, arrowY + hW, 'FD');
+                            docPdf.line(centerX - (arrLen/2), arrowY, centerX + (arrLen/2) - headL, arrowY);
+                            docPdf.triangle(centerX + (arrLen/2), arrowY, centerX + (arrLen/2) - headL, arrowY - headW, centerX + (arrLen/2) - headL, arrowY + headW, 'FD');
                         } else {
-                            doc.line(lineStartX + hS, arrowY, lineEndX, arrowY); 
-                            doc.triangle(lineStartX, arrowY, lineStartX + hS, arrowY - hW, lineStartX + hS, arrowY + hW, 'FD');
+                            docPdf.line(centerX - (arrLen/2) + headL, arrowY, centerX + (arrLen/2), arrowY);
+                            docPdf.triangle(centerX - (arrLen/2), arrowY, centerX - (arrLen/2) + headL, arrowY - headW, centerX - (arrLen/2) + headL, arrowY + headW, 'FD');
                         }
                     }
-                    if (i % 20 === 0) { statusMessage.textContent = `A processar: ${i+1}/${targets.length}`; await new Promise(r => setTimeout(r, 1)); }
-                }
-
-                if (mode === 'download') {
-                    doc.save(`Etiquetas_GLP_${Date.now()}.pdf`);
-                } else {
-                    const blob = doc.output('blob');
-                    const blobUrl = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
-                    lastBlobUrl = blobUrl;
-                    
-                    if (isMobile) {
-                        // Oculta iframe e mostra botão de download/open no mobile
-                        printFrame.classList.add('hidden');
-                        mobilePrintOverlay.classList.remove('hidden');
-                    } else {
-                        printFrame.classList.remove('hidden');
-                        mobilePrintOverlay.classList.add('hidden');
-                        printFrame.src = `${blobUrl}#toolbar=1&view=FitH`;
+                    if (i % 25 === 0) {
+                        statusMessage.textContent = `Processando: ${i+1}/${targets.length}`;
+                        await new Promise(r => setTimeout(r, 1));
                     }
-                    printModal.classList.add('active');
                 }
 
-            } catch (e) { alert("Erro ao processar etiquetas."); } finally { 
-                statusBox.classList.add('hidden'); 
-                generateBtn.disabled = false; 
-                printBtn.disabled = false;
-            }
+                // Salva o último intervalo e ID na cloud
+                if (db && currentMode === 'range') {
+                    const startVal = rangeStart.value;
+                    const endNum = parseInt(rangeEnd.value);
+                    const currentRange = `${startVal}-${rangeEnd.value}`;
+                    await updateLastLpn(endNum, currentRange);
+                }
+
+                if (mode === 'download') docPdf.save(`LPNs_${Date.now()}.pdf`);
+                else {
+                    const url = URL.createObjectURL(docPdf.output('blob'));
+                    document.getElementById('printFrame').src = url;
+                    document.getElementById('printModal').classList.add('active');
+                }
+            } catch (err) { console.error(err); showFeedback("Erro ao gerar PDF", "error"); } 
+            finally { statusBox.classList.add('hidden'); }
         }
 
         function createQRImage(text, size) {
@@ -822,20 +745,58 @@
                 const div = document.createElement('div');
                 div.style.position = 'absolute'; div.style.left = '-9999px';
                 document.body.appendChild(div);
-                new QRCode(div, { text, width: size, height: size, correctLevel: QRCode.CorrectLevel.H });
+                new QRCode(div, { text, width: size, height: size });
                 setTimeout(() => {
-                    const canvas = div.querySelector('canvas');
-                    let data = null;
-                    if (canvas) data = canvas.toDataURL("image/png");
-                    else {
-                        const img = div.querySelector('img');
-                        if (img && img.src.startsWith('data:')) data = img.src;
-                    }
+                    const img = div.querySelector('img');
+                    res(img ? img.src : div.querySelector('canvas')?.toDataURL());
                     document.body.removeChild(div);
-                    res(data);
-                }, 300);
+                }, 150);
             });
         }
+
+        // Eventos
+        document.getElementById('btnModeRange').onclick = () => {
+            currentMode = 'range';
+            document.getElementById('btnModeRange').classList.add('active');
+            document.getElementById('btnModeManual').classList.remove('active');
+            document.getElementById('rangeInputContainer').classList.remove('hidden');
+            document.getElementById('manualInputContainer').classList.add('hidden');
+            syncData();
+        };
+
+        document.getElementById('btnModeManual').onclick = () => {
+            currentMode = 'manual';
+            document.getElementById('btnModeManual').classList.add('active');
+            document.getElementById('btnModeRange').classList.remove('active');
+            document.getElementById('manualInputContainer').classList.remove('hidden');
+            document.getElementById('rangeInputContainer').classList.add('hidden');
+            syncData();
+        };
+
+        const elements = [rangePrefix, rangeStart, rangeEnd, allowRepetition, 
+                          document.getElementById('manualText'), document.getElementById('manualQty'), 
+                          document.getElementById('labelWidth'), document.getElementById('labelHeight'), 
+                          document.getElementById('qrSizeInput'), document.getElementById('labelMargin'), 
+                          document.getElementById('qrTextGap'), document.getElementById('maxFontSize'),
+                          document.getElementById('arrowType'), document.getElementById('arrowSize'),
+                          document.getElementById('arrowThickness'), document.getElementById('textArrowGap')];
+        
+        elements.forEach(el => {
+            if (el) {
+                el.addEventListener('input', syncData);
+                el.addEventListener('change', syncData);
+            }
+        });
+
+        generateBtn.onclick = () => processOutput('download');
+        printBtn.onclick = () => processOutput('print');
+        document.getElementById('closeModalBtn').onclick = () => document.getElementById('printModal').classList.remove('active');
+
+        window.onload = () => {
+            initFirebase();
+            initLetterRulesUI();
+            syncData();
+        };
     </script>
 </body>
 </html>
