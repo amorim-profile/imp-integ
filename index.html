@@ -14,9 +14,9 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        window.fb = { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, onSnapshot };
+        window.fb = { initializeApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, deleteDoc, query };
     </script>
 
     <style>
@@ -58,7 +58,7 @@
             color: white;
             border-color: #2563eb;
         }
-        #printModal {
+        #printModal, #historyModal {
             display: none;
             position: fixed;
             inset: 0;
@@ -69,15 +69,13 @@
             justify-content: center;
             padding: 1rem;
         }
-        #printModal.active { display: flex; }
+        #printModal.active, #historyModal.active { display: flex; }
         
         .toggle-checkbox:checked + .toggle-label { background-color: #2563eb; }
         .toggle-checkbox:checked + .toggle-label .toggle-dot { transform: translateX(100%); }
 
-        #labelsChecklist::-webkit-scrollbar, 
-        #letterRulesContainer::-webkit-scrollbar { width: 4px; }
-        #labelsChecklist::-webkit-scrollbar-thumb,
-        #letterRulesContainer::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        #labelsChecklist::-webkit-scrollbar, .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        #labelsChecklist::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
 
         @media (max-width: 768px) {
             .sticky-preview { position: relative !important; top: 0 !important; }
@@ -89,11 +87,20 @@
     <div class="max-w-6xl mx-auto py-8 px-4">
         <header class="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-                <h1 class="text-2xl md:text-3xl font-bold text-slate-900 font-sans">Gerador de Etiquetas LPNs</h1>
-                <p class="text-slate-600 font-sans text-sm">v9.7: Controlo de Range e Persistência.</p>
+                <h1 class="text-2xl md:text-3xl font-bold text-slate-900 font-sans">Gerador de Etiquetas</h1>
+                <p class="text-slate-600 font-sans text-sm">v11.8.3: Formatação de Dígitos</p>
             </div>
-            <div id="lastLpnBadge" class="hidden text-[10px] bg-indigo-700 text-white px-4 py-1.5 rounded-full font-bold uppercase tracking-widest shadow-sm">
-                Último Gerado: <span id="lastLpnValue">---</span>
+            <div class="flex flex-wrap items-center gap-3">
+                <div id="dbStatus" class="flex items-center gap-1.5 bg-slate-200 px-3 py-1.5 rounded-full text-[9px] font-black uppercase text-slate-500 tracking-tighter">
+                    <span class="w-2 h-2 bg-slate-400 rounded-full animate-pulse"></span>
+                    A Ligar...
+                </div>
+                <button id="btnOpenHistory" class="text-[10px] bg-white border border-slate-300 text-slate-600 px-4 py-1.5 rounded-full font-bold uppercase tracking-widest shadow-sm hover:bg-slate-50 transition-colors">
+                    Histórico
+                </button>
+                <div id="lastLpnBadge" class="hidden text-[10px] bg-indigo-700 text-white px-4 py-1.5 rounded-full font-bold uppercase tracking-widest shadow-sm">
+                    Último: <span id="lastLpnValue">---</span>
+                </div>
             </div>
         </header>
 
@@ -107,19 +114,32 @@
                     </h2>
                     
                     <div class="flex p-1 bg-slate-100 rounded-xl mb-4">
-                        <button id="btnModeRange" class="mode-btn active flex-1 py-2 text-xs font-bold rounded-lg transition-all border border-transparent">SEQUENCIAL</button>
-                        <button id="btnModeManual" class="mode-btn flex-1 py-2 text-xs font-bold rounded-lg transition-all border border-transparent">MANUAL</button>
+                        <button id="btnModeRange" class="mode-btn active flex-1 py-2 text-[10px] font-bold rounded-lg transition-all border border-transparent">SEQUENCIAL</button>
+                        <button id="btnModeManual" class="mode-btn flex-1 py-2 text-[10px] font-bold rounded-lg transition-all border border-transparent">MANUAL</button>
+                        <button id="btnModeFile" class="mode-btn flex-1 py-2 text-[10px] font-bold rounded-lg transition-all border border-transparent">FICHEIRO</button>
                     </div>
 
+                    <!-- Modo Sequencial -->
                     <div id="rangeInputContainer" class="space-y-4">
                         <div>
-                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest flex justify-between">
-                                Descrição (Prefixo)
-                                <span id="lastRangeInfo" class="text-indigo-600 font-black lowercase italic"></span>
-                            </label>
-                            <input type="text" id="rangePrefix" placeholder="Ex: LPN-" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Origem</label>
+                            <select id="rangeSource" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                                <option value="Fabrica">Fabrica</option>
+                                <option value="GLP">GLP</option>
+                            </select>
                         </div>
-
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest flex justify-between">
+                                    Descrição (Prefixo)
+                                </label>
+                                <input type="text" id="rangePrefix" placeholder="Ex: LPN-" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold uppercase">
+                            </div>
+                            <div>
+                                <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Qtd. Dígitos</label>
+                                <input type="number" id="rangeDigits" value="6" min="1" max="15" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                            </div>
+                        </div>
                         <div class="grid grid-cols-2 gap-3">
                             <div>
                                 <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Início (Nº)</label>
@@ -130,7 +150,6 @@
                                 <input type="number" id="rangeEnd" placeholder="2000" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
                             </div>
                         </div>
-
                         <div class="bg-blue-50 p-3 rounded-xl border border-blue-100">
                             <label class="flex items-center cursor-pointer select-none">
                                 <div class="relative">
@@ -139,22 +158,43 @@
                                         <div class="toggle-dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform"></div>
                                     </div>
                                 </div>
-                                <div class="ml-3">
+                                <div class="ml-3 flex-grow text-left">
                                     <p class="text-[11px] font-black text-blue-900 uppercase">Permitir Repetição</p>
-                                    <p class="text-[9px] text-blue-700 italic">Ignorar histórico de numeração</p>
+                                    <p class="text-[9px] text-blue-700 italic tracking-tight">Ignorar histórico de numeração</p>
                                 </div>
                             </label>
                         </div>
+                        
+                        <button id="btnSaveRange" disabled class="w-full bg-indigo-600 text-white font-black py-2.5 px-4 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 uppercase text-[10px] tracking-widest hover:scale-[1.02] disabled:opacity-50 disabled:pointer-events-none">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                            Registar no Histórico
+                        </button>
                     </div>
 
+                    <!-- Modo Manual -->
                     <div id="manualInputContainer" class="hidden space-y-4">
                         <div>
                             <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Descrição</label>
-                            <input type="text" id="manualText" placeholder="Ex: A.001" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                            <input type="text" id="manualText" placeholder="Ex: A.001" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold text-slate-900 uppercase">
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Quantidade</label>
-                            <input type="number" id="manualQty" value="1" min="1" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold">
+                            <input type="number" id="manualQty" value="1" min="1" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold text-slate-900">
+                        </div>
+                    </div>
+
+                    <!-- Modo Ficheiro -->
+                    <div id="fileInputContainer" class="hidden space-y-4">
+                        <label class="group block border-2 border-dashed border-slate-300 rounded-xl p-6 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer relative">
+                            <div class="text-slate-400 group-hover:text-blue-500 mb-2 transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-8 h-8 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13l3-3m0 0l3 3m-3-3v12m-9-4a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+                            </div>
+                            <span class="text-xs font-bold text-slate-600 block uppercase">Excel / CSV</span>
+                            <input type="file" id="fileInput" accept=".xlsx, .xls, .csv" class="hidden"/>
+                        </label>
+                        <div id="fileLoader" class="hidden flex items-center justify-center gap-2 text-blue-600 font-bold text-[10px] uppercase">
+                            <div class="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                            A ler ficheiro...
                         </div>
                     </div>
                 </section>
@@ -165,6 +205,11 @@
                         <span class="step-number">2</span> Dados Gerados
                     </h2>
                     <div class="space-y-4">
+                        <div id="colSelectWrapper" class="hidden">
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Coluna do Endereço</label>
+                            <select id="columnSelect" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-blue-50 font-bold text-blue-900"></select>
+                        </div>
+
                         <div class="flex justify-between items-center mb-1">
                             <p id="sampleCounter" class="text-[10px] font-bold text-blue-600 uppercase">0 etiquetas prontas</p>
                             <div class="flex gap-3">
@@ -211,7 +256,6 @@
                             </div>
                         </div>
 
-                        <!-- Configurações de Margens Restauradas -->
                         <div class="grid grid-cols-2 gap-3 pb-2 border-b border-slate-100 bg-slate-50 p-2 rounded-lg">
                             <div>
                                 <label class="block text-[10px] font-bold text-indigo-600 uppercase">Margem Geral (mm)</label>
@@ -225,34 +269,38 @@
 
                         <div class="bg-blue-50 p-3 rounded-xl space-y-3 border border-blue-100">
                             <p class="text-[10px] font-black text-blue-700 uppercase">Setas</p>
+                            <div>
+                                <label class="block text-[10px] font-bold text-indigo-600 uppercase tracking-tighter">Posição da Seta</label>
+                                <select id="arrowPosition" class="w-full mt-1 p-2 border border-indigo-200 rounded-lg text-sm font-bold bg-white">
+                                    <option value="below" selected>Abaixo do Texto</option>
+                                    <option value="right">À Direita do QR/Texto</option>
+                                </select>
+                            </div>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Direção Global</label>
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Direção Global</label>
                                     <select id="arrowType" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
                                         <option value="right">Direita</option>
                                         <option value="left">Esquerda</option>
+                                        <option value="up">Cima</option>
+                                        <option value="down">Baixo</option>
                                         <option value="none" selected>Nenhuma</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Compr. (mm)</label>
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Compr. (mm)</label>
                                     <input type="number" id="arrowSize" value="15" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
                                 </div>
                             </div>
                             <div class="grid grid-cols-2 gap-3">
                                 <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Espessura (mm)</label>
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Espessura (mm)</label>
                                     <input type="number" id="arrowThickness" value="1.5" step="0.1" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
                                 </div>
                                 <div>
-                                    <label class="block text-[10px] font-bold text-slate-500 uppercase">Txt/Seta (mm)</label>
+                                    <label class="block text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Txt/Seta (mm)</label>
                                     <input type="number" id="textArrowGap" value="3" class="w-full mt-1 p-2 border rounded-lg text-sm font-semibold bg-white">
                                 </div>
-                            </div>
-
-                            <div class="mt-2 pt-2 border-t border-blue-200">
-                                <p class="text-[9px] font-black text-blue-600 uppercase mb-2 text-center">Regras Automáticas (A a H)</p>
-                                <div id="letterRulesContainer" class="space-y-2 max-h-48 overflow-y-auto pr-1"></div>
                             </div>
                         </div>
 
@@ -304,38 +352,75 @@
         </div>
     </div>
 
+    <!-- Modal de Histórico -->
+    <div id="historyModal">
+        <div class="bg-white w-full h-full max-w-4xl max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div class="p-5 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+                <div>
+                    <h3 class="font-black text-slate-800 uppercase text-sm">Histórico de Numerações</h3>
+                    <p class="text-[10px] text-slate-500 font-bold uppercase tracking-tight">Intervalos registados por Origem e Prefixo</p>
+                </div>
+                <button id="closeHistoryBtn" class="text-slate-600 font-bold text-xs uppercase hover:bg-slate-100 px-4 py-2 rounded-xl transition-colors border border-slate-200">Fechar</button>
+            </div>
+            <div class="flex-grow overflow-auto p-4 custom-scrollbar bg-slate-50">
+                <table class="w-full text-left border-collapse bg-white rounded-xl shadow-sm overflow-hidden">
+                    <thead class="bg-slate-800 text-white text-[10px] uppercase font-bold tracking-widest">
+                        <tr>
+                            <th class="p-4">Origem</th>
+                            <th class="p-4">Prefixo</th>
+                            <th class="p-4">Intervalo</th>
+                            <th class="p-4">Data</th>
+                            <th class="p-4 text-center">Acção</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyTableBody" class="text-xs font-medium text-slate-700">
+                        <!-- Conteúdo dinâmico -->
+                    </tbody>
+                </table>
+                <div id="historyEmptyMsg" class="hidden text-center py-20">
+                    <div class="text-slate-300 mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    </div>
+                    <p class="text-slate-400 font-bold uppercase text-[10px]">Sem dados disponíveis</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script type="module">
         const { jsPDF } = window.jspdf;
 
         // --- GESTÃO DE AMBIENTE ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'lpn-gen-prod';
         let firebaseConfig = null;
         try {
-            if (typeof __firebase_config !== 'undefined') {
+            if (typeof __firebase_config !== 'undefined' && __firebase_config) {
                 firebaseConfig = JSON.parse(__firebase_config);
             }
         } catch (e) { console.warn("Ambiente local detetado."); }
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'lpn-gen-prod';
-        let db, auth, user, lastGeneratedLpn = 0;
+        let db = null, auth = null, user = null, lastGeneratedLpn = 0;
+        let historyData = [];
 
         // Estado Global
         let currentMode = 'range';
         let cleanAddresses = [];
         let selectedIndices = new Set();
-        
-        // Regras de Letras
+        let workbook = null;
+        let sheetDataRaw = [];
         const letterRules = {};
-        "ABCDEFGH".split('').forEach(l => {
-            letterRules[l] = { odd: 'global', even: 'global' };
-        });
+        "ABCDEFGH".split('').forEach(l => { letterRules[l] = { odd: 'global', even: 'global' }; });
 
         // Selectores
+        const rangeSource = document.getElementById('rangeSource');
         const rangePrefix = document.getElementById('rangePrefix');
-        const rangeStart = document.getElementById('rangeStart');
-        const rangeEnd = document.getElementById('rangeEnd');
+        const rangeDigits = document.getElementById('rangeDigits');
+        const rangeStartInput = document.getElementById('rangeStart');
+        const rangeEndInput = document.getElementById('rangeEnd');
         const allowRepetition = document.getElementById('allowRepetition');
         const generateBtn = document.getElementById('generateBtn');
         const printBtn = document.getElementById('printBtn');
+        const btnSaveRange = document.getElementById('btnSaveRange');
         const previewContainer = document.getElementById('previewContainer');
         const previewWrapper = document.getElementById('previewWrapper');
         const labelsChecklist = document.getElementById('labelsChecklist');
@@ -344,161 +429,297 @@
         const deselectAllBtn = document.getElementById('deselectAllBtn');
         const statusBox = document.getElementById('statusBox');
         const statusMessage = document.getElementById('statusMessage');
-        const letterRulesContainer = document.getElementById('letterRulesContainer');
         const lastRangeInfo = document.getElementById('lastRangeInfo');
+        const arrowPosition = document.getElementById('arrowPosition');
+        const historyTableBody = document.getElementById('historyTableBody');
+        const historyEmptyMsg = document.getElementById('historyEmptyMsg');
+        const dbStatus = document.getElementById('dbStatus');
+        
+        const btnModeRange = document.getElementById('btnModeRange');
+        const btnModeManual = document.getElementById('btnModeManual');
+        const btnModeFile = document.getElementById('btnModeFile');
+        const fileInputContainer = document.getElementById('fileInputContainer');
+        const manualInputContainer = document.getElementById('manualInputContainer');
+        const rangeInputContainer = document.getElementById('rangeInputContainer');
+        const colSelectWrapper = document.getElementById('colSelectWrapper');
+        const columnSelect = document.getElementById('columnSelect');
+        const fileInput = document.getElementById('fileInput');
+        const fileLoader = document.getElementById('fileLoader');
 
-        // Inicialização UI Regras
-        function initLetterRulesUI() {
-            if(!letterRulesContainer) return;
-            letterRulesContainer.innerHTML = "ABCDEFGH".split('').map(l => `
-                <div class="bg-white p-2 rounded border border-blue-100 shadow-sm">
-                    <div class="flex items-center justify-between mb-1">
-                        <span class="text-[11px] font-black text-blue-800">Letra ${l}</span>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="text-[8px] uppercase text-slate-400 block font-bold">Ímpar</label>
-                            <select onchange="window.updateRule('${l}', 'odd', this.value)" class="w-full text-[10px] p-1 border rounded bg-slate-50 font-bold">
-                                <option value="global">Global</option>
-                                <option value="right">Direita</option>
-                                <option value="left">Esquerda</option>
-                                <option value="none">Nenhuma</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="text-[8px] uppercase text-slate-400 block font-bold">Par</label>
-                            <select onchange="window.updateRule('${l}', 'even', this.value)" class="w-full text-[10px] p-1 border rounded bg-slate-50 font-bold">
-                                <option value="global">Global</option>
-                                <option value="right">Direita</option>
-                                <option value="left">Esquerda</option>
-                                <option value="none">Nenhuma</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-            `).join('');
+        // --- PREVIEW LOGIC ---
+        function updatePreview() {
+            if (cleanAddresses.length === 0 || selectedIndices.size === 0) {
+                previewContainer.innerHTML = '<p class="text-slate-300 font-bold uppercase text-[10px]">Sem etiquetas selecionadas</p>';
+                return;
+            }
+            const firstIdx = Array.from(selectedIndices).sort((a,b)=>a-b)[0];
+            const addr = cleanAddresses[firstIdx];
+            const w = Number(document.getElementById('labelWidth').value) || 100;
+            const h = Number(document.getElementById('labelHeight').value) || 50;
+            const qrS = Number(document.getElementById('qrSizeInput').value) || 30;
+            const marg = Number(document.getElementById('labelMargin').value) || 3;
+            const gap = Number(document.getElementById('qrTextGap').value) || 5;
+            const fs = Number(document.getElementById('maxFontSize').value) || 100;
+            const arrLen = Number(document.getElementById('arrowSize').value) || 15;
+            const arrThick = Number(document.getElementById('arrowThickness').value) || 1.5;
+            const textArrGap = Number(document.getElementById('textArrowGap').value) || 3;
+            const arrPos = arrowPosition.value;
+            const resolvedDir = resolveArrowDirection(addr);
+            const availableWidth = previewWrapper.clientWidth - 40;
+            const scale = Math.min(availableWidth / w, 4);
+            previewContainer.style.width = `${w * scale}px`;
+            previewContainer.style.height = `${h * scale}px`;
+            previewContainer.style.padding = `${marg * scale}px`;
+            previewContainer.innerHTML = '';
+            const mainWrapper = document.createElement('div');
+            mainWrapper.style.cssText = `width:100%; height:100%; display:flex; flex-direction:${arrPos === 'right' ? 'row' : 'column'}; align-items:center; justify-content:center;`;
+            const groupContent = document.createElement('div');
+            groupContent.style.cssText = `display:flex; flex-direction:${arrPos === 'right' ? 'row' : 'column'}; align-items:center; justify-content:center;`;
+            const leftBlock = document.createElement('div');
+            leftBlock.style.cssText = `display:flex; flex-direction:column; align-items:center; justify-content:center;`;
+            const qrZone = document.createElement('div');
+            qrZone.className = "zone-indicator";
+            qrZone.style.width = `${qrS * scale}px`; qrZone.style.height = `${qrS * scale}px`;
+            const textZone = document.createElement('div');
+            textZone.style.cssText = `font-weight:bold; text-align:center; font-size:${(fs * scale) / 5}px; line-height:1; margin-top:${gap * scale}px;`;
+            textZone.textContent = addr;
+            leftBlock.appendChild(qrZone); leftBlock.appendChild(textZone); groupContent.appendChild(leftBlock);
+            if (resolvedDir !== 'none') {
+                const arrowWrapper = document.createElement('div');
+                arrowWrapper.style.cssText = `display:flex; align-items:center; justify-content:center;`;
+                if (arrPos === 'below') arrowWrapper.style.marginTop = `${textArrGap * scale}px`;
+                else arrowWrapper.style.marginLeft = `${textArrGap * scale}px`;
+                const isVertical = resolvedDir === 'up' || resolvedDir === 'down';
+                const svgW = isVertical ? (arrThick * 6 * scale) : (arrLen * scale);
+                const svgH = isVertical ? (arrLen * scale) : (arrThick * 6 * scale);
+                const arrowSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                arrowSvg.setAttribute("width", svgW.toString()); arrowSvg.setAttribute("height", svgH.toString());
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
+                const headSize = arrThick * 3 * scale; const midX = svgW / 2; const midY = svgH / 2;
+                if (resolvedDir === 'right') {
+                    line.setAttribute("x1", "0"); line.setAttribute("x2", (svgW - headSize).toString()); line.setAttribute("y1", midY.toString()); line.setAttribute("y2", midY.toString());
+                    head.setAttribute("points", `${svgW},${midY} ${svgW - headSize},${midY - headSize/1.5} ${svgW - headSize},${midY + headSize/1.5}`);
+                } else if (resolvedDir === 'left') {
+                    line.setAttribute("x1", headSize.toString()); line.setAttribute("x2", svgW.toString()); line.setAttribute("y1", midY.toString()); line.setAttribute("y2", midY.toString());
+                    head.setAttribute("points", `0,${midY} ${headSize},${midY - headSize/1.5} ${headSize},${midY + headSize/1.5}`);
+                } else if (resolvedDir === 'up') {
+                    line.setAttribute("x1", midX.toString()); line.setAttribute("x2", midX.toString()); line.setAttribute("y1", headSize.toString()); line.setAttribute("y2", svgH.toString());
+                    head.setAttribute("points", `${midX},0 ${midX - headSize/1.5},${headSize} ${midX + headSize/1.5},${headSize}`);
+                } else if (resolvedDir === 'down') {
+                    line.setAttribute("x1", midX.toString()); line.setAttribute("x2", midX.toString()); line.setAttribute("y1", "0"); line.setAttribute("y2", (svgH - headSize).toString());
+                    head.setAttribute("points", `${midX},${svgH} ${midX - headSize/1.5},${svgH - headSize} ${midX + headSize/1.5},${svgH - headSize}`);
+                }
+                line.setAttribute("stroke", "black"); line.setAttribute("stroke-width", (arrThick * scale).toString());
+                head.setAttribute("fill", "black"); arrowSvg.appendChild(line); arrowSvg.appendChild(head); arrowWrapper.appendChild(arrowSvg); groupContent.appendChild(arrowWrapper);
+            }
+            mainWrapper.appendChild(groupContent); previewContainer.appendChild(mainWrapper);
+            new QRCode(qrZone, { text: addr, width: qrS * scale, height: qrS * scale });
+            document.getElementById('labelDimensions').textContent = `${w}x${h} mm`;
         }
 
-        window.updateRule = (letter, type, value) => {
-            letterRules[letter][type] = value;
-            updatePreview();
-        };
-
-        // Inicialização Firebase
-        async function initFirebase() {
-            if (!firebaseConfig) return;
+        // --- FIREBASE INITIALIZATION ---
+        const initFirebase = async () => {
+            if (!firebaseConfig) {
+                dbStatus.innerHTML = '<span class="w-2 h-2 bg-amber-500 rounded-full"></span> Modo Local';
+                dbStatus.classList.replace('text-slate-500', 'text-amber-600');
+                loadLocalHistory();
+                syncData();
+                return;
+            }
             try {
                 const app = window.fb.initializeApp(firebaseConfig);
                 auth = window.fb.getAuth(app);
                 db = window.fb.getFirestore(app);
-
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await window.fb.signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await window.fb.signInAnonymously(auth);
-                }
-
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await window.fb.signInWithCustomToken(auth, __initial_auth_token);
+                else await window.fb.signInAnonymously(auth);
                 window.fb.onAuthStateChanged(auth, (u) => {
                     user = u;
-                    if (user) setupDataSync();
+                    if (user) {
+                        dbStatus.innerHTML = '<span class="w-2 h-2 bg-green-500 rounded-full"></span> Online';
+                        dbStatus.classList.replace('text-slate-500', 'text-green-600');
+                        setupDataSync();
+                    }
                 });
-            } catch (err) { console.error("Erro Firebase:", err); }
-        }
+            } catch (err) {
+                console.warn("Firebase Init Error (Local Fallback):", err);
+                dbStatus.innerHTML = '<span class="w-2 h-2 bg-amber-500 rounded-full"></span> Modo Local';
+                loadLocalHistory();
+                syncData();
+            }
+        };
 
-        function setupDataSync() {
-            if (!db) return;
+        const setupDataSync = () => {
+            if (!db || !user) return;
             const settingsDoc = window.fb.doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
             window.fb.onSnapshot(settingsDoc, (snapshot) => {
                 if (snapshot.exists()) {
                     const data = snapshot.data();
-                    lastGeneratedLpn = data.last_lpn || 0;
-                    const lastRange = data.last_range || "";
-                    
-                    const badgeVal = document.getElementById('lastLpnValue');
-                    if(badgeVal) badgeVal.textContent = lastGeneratedLpn;
+                    lastGeneratedLpn = Number(data.last_lpn || 0);
+                    if (document.getElementById('lastLpnValue')) document.getElementById('lastLpnValue').textContent = lastGeneratedLpn;
                     document.getElementById('lastLpnBadge')?.classList.remove('hidden');
-                    
-                    if (lastRangeInfo) {
-                        lastRangeInfo.textContent = lastRange ? `(última: ${lastRange})` : "";
-                    }
-
-                    syncData(); 
+                    if (lastRangeInfo) lastRangeInfo.textContent = data.last_range ? `(última: ${data.last_range})` : "";
                 }
-            }, (err) => console.warn("Firestore Sync Error:", err));
+                syncData();
+            });
+            const historyColl = window.fb.collection(db, 'artifacts', appId, 'public', 'data', 'history');
+            window.fb.onSnapshot(historyColl, (snapshot) => {
+                historyData = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+                renderHistory();
+                syncData();
+            });
+        };
+
+        // --- HÍBRIDO: LOCAL STORAGE FALLBACK ---
+        function loadLocalHistory() {
+            try {
+                const stored = localStorage.getItem(`history_${appId}`);
+                if (stored) {
+                    historyData = JSON.parse(stored);
+                    renderHistory();
+                }
+            } catch (e) { console.error("Local Load Error:", e); }
         }
 
-        async function updateLastLpn(val, rangeStr) {
-            if (!user || !db || val <= lastGeneratedLpn) return;
-            const settingsDoc = window.fb.doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'global');
-            await window.fb.setDoc(settingsDoc, { last_lpn: val, last_range: rangeStr }, { merge: true });
+        function saveLocalHistory() {
+            try {
+                localStorage.setItem(`history_${appId}`, JSON.stringify(historyData));
+            } catch (e) { console.error("Local Save Error:", e); }
         }
 
-        // Determinação de direção de seta com base em regras
-        function resolveArrowDirection(addr) {
-            if (!addr) return 'none';
-            const firstChar = addr.charAt(0).toUpperCase();
-            const numbers = addr.match(/\d+/g);
-            const levelNum = numbers ? parseInt(numbers[0]) : 0; 
-            const isOdd = levelNum % 2 !== 0;
+        async function saveRangeToHistory() {
+            const source = rangeSource.value;
+            const prefix = rangePrefix.value.trim().toUpperCase();
+            const start = Number(rangeStartInput.value);
+            const end = Number(rangeEndInput.value);
+            if (isNaN(start) || isNaN(end)) return;
 
-            if (letterRules[firstChar]) {
-                const rule = isOdd ? letterRules[firstChar].odd : letterRules[firstChar].even;
-                if (rule !== 'global') return rule;
+            if (checkOverlap() && !allowRepetition.checked) {
+                showFeedback("Este intervalo já está registado.", "error");
+                return;
             }
-            return document.getElementById('arrowType').value;
+
+            const newEntry = { source, prefix, start, end, timestamp: Date.now() };
+
+            if (db && user) {
+                try {
+                    const historyColl = window.fb.collection(db, 'artifacts', appId, 'public', 'data', 'history');
+                    await window.fb.addDoc(historyColl, newEntry);
+                    showFeedback("Intervalo registado na Nuvem.", "success");
+                } catch (e) { showFeedback("Erro ao gravar na Nuvem.", "error"); }
+            } else {
+                historyData.push({ id: 'local_' + Date.now(), ...newEntry });
+                saveLocalHistory();
+                renderHistory();
+                syncData();
+                showFeedback("Intervalo registado Localmente.", "success");
+            }
         }
 
-        // Lógica de Sincronização
+        window.deleteHistoryItem = async (id) => {
+            if (db && user && !id.startsWith('local_')) {
+                try {
+                    const docRef = window.fb.doc(db, 'artifacts', appId, 'public', 'data', 'history', id);
+                    await window.fb.deleteDoc(docRef);
+                    showFeedback("Registo removido.", "success");
+                } catch (e) { showFeedback("Erro ao remover.", "error"); }
+            } else {
+                historyData = historyData.filter(item => item.id !== id);
+                saveLocalHistory();
+                renderHistory();
+                syncData();
+                showFeedback("Registo local removido.", "success");
+            }
+        };
+
+        // --- LOGIC ---
+        function checkOverlap() {
+            if (currentMode !== 'range' || allowRepetition.checked) return null;
+            const source = rangeSource.value;
+            const prefix = rangePrefix.value.trim().toUpperCase();
+            const start = Number(rangeStartInput.value);
+            const end = Number(rangeEndInput.value);
+            if (isNaN(start) || isNaN(end)) return null;
+
+            return historyData.find(item => {
+                return item.source === source && 
+                       String(item.prefix || "").toUpperCase() === prefix && 
+                       Math.max(start, Number(item.start)) <= Math.min(end, Number(item.end));
+            });
+        }
+
+        function handleFileUpload(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            fileLoader.classList.remove('hidden');
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const data = evt.target.result;
+                    workbook = XLSX.read(data, { type: 'binary', cellDates: true });
+                    const ws = workbook.Sheets[workbook.SheetNames[0]];
+                    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+                    if (rows.length > 0) {
+                        let headerIdx = 0;
+                        while (headerIdx < rows.length && rows[headerIdx].every(c => String(c).trim() === "")) headerIdx++;
+                        const headers = rows[headerIdx].map((h, i) => String(h || "").trim() || `COLUNA_${i+1}`);
+                        columnSelect.innerHTML = headers.map(h => `<option value="${h}">${h}</option>`).join('');
+                        sheetDataRaw = rows.slice(headerIdx + 1).map(row => {
+                            const obj = {}; headers.forEach((h, idx) => obj[h] = row[idx]); return obj;
+                        });
+                        const targetCol = headers.find(h => ["LOC", "LOCAL", "ENDEREÇO", "ADDRESS", "LPN"].includes(h.toUpperCase().trim()));
+                        columnSelect.value = targetCol || headers[0];
+                        syncData();
+                    }
+                } catch (err) { showFeedback("Erro ao ler ficheiro", "error"); }
+                finally { fileLoader.classList.add('hidden'); }
+            };
+            reader.readAsBinaryString(file);
+        }
+
         function syncData() {
             let isValid = false;
-            let sequenceError = false;
+            let conflictFound = false;
             const oldLength = cleanAddresses.length;
 
             if (currentMode === 'range') {
-                const prefix = rangePrefix.value.trim();
-                const start = parseInt(rangeStart.value);
-                const end = parseInt(rangeEnd.value);
-                const repeat = allowRepetition.checked;
-
+                const prefix = rangePrefix.value.trim().toUpperCase();
+                const digits = parseInt(rangeDigits.value) || 0;
+                const start = Number(rangeStartInput.value);
+                const end = Number(rangeEndInput.value);
+                
                 if (!isNaN(start) && !isNaN(end) && start <= end) {
                     isValid = true;
-                    if (db && !repeat && start <= lastGeneratedLpn) {
-                        sequenceError = true;
-                    }
-                    cleanAddresses = Array.from({ length: end - start + 1 }, (_, i) => String(prefix + (start + i)));
-                } else {
-                    cleanAddresses = [];
-                }
-            } else {
-                const text = document.getElementById('manualText').value.trim() || "A.001";
-                const qty = parseInt(document.getElementById('manualQty').value) || 1;
-                cleanAddresses = Array(qty).fill(text);
-                isValid = true; 
+                    if (checkOverlap()) conflictFound = true;
+                    cleanAddresses = Array.from({ length: end - start + 1 }, (_, i) => {
+                        const numStr = (start + i).toString().padStart(digits, '0');
+                        return String(prefix + numStr);
+                    });
+                } else { cleanAddresses = []; }
+            } else if (currentMode === 'manual') {
+                const text = document.getElementById('manualText').value.trim().toUpperCase() || "A.001";
+                const qty = Number(document.getElementById('manualQty').value) || 1;
+                cleanAddresses = Array(qty).fill(text); isValid = true; 
+            } else if (currentMode === 'file') {
+                if (sheetDataRaw.length > 0) {
+                    const selCol = columnSelect.value;
+                    cleanAddresses = sheetDataRaw.map(row => String(row[selCol] || "").trim().toUpperCase()).filter(v => v !== "");
+                    isValid = cleanAddresses.length > 0;
+                } else { cleanAddresses = []; }
             }
 
             if (isValid && cleanAddresses.length > 0) {
-                if (cleanAddresses.length !== oldLength || currentMode === 'manual') {
-                    selectedIndices = new Set(cleanAddresses.keys());
-                }
-                
-                document.getElementById('sampleCounter').textContent = `${cleanAddresses.length} etiquetas geradas`;
+                if (cleanAddresses.length !== oldLength || currentMode === 'manual') selectedIndices = new Set(cleanAddresses.keys());
                 document.getElementById('selectionSection').classList.remove('disabled-section');
                 document.getElementById('configSection').classList.remove('disabled-section');
-                
                 renderChecklist();
-
-                if (!sequenceError) {
-                    enableActions();
-                } else {
+                if (!conflictFound) enableActions();
+                else {
                     disableActionsOnly();
-                    if (rangeStart.value !== "") {
-                        showFeedback(`Não é permitido repetir. (Início ${rangeStart.value} já gerado)`, "error");
-                    }
+                    if (rangeStartInput.value !== "") showFeedback(`Intervalo já existente em ${rangeSource.value}.`, "error");
                 }
                 updatePreview();
-            } else {
-                disableAll();
-            }
+            } else { disableAll(); }
         }
 
         function renderChecklist() {
@@ -512,291 +733,184 @@
                         <span class="truncate font-bold text-slate-700">${item.addr}</span>
                     </div>
                 `).join('');
-            
             const count = selectedIndices.size;
             document.getElementById('sampleCounter').textContent = `${count} de ${cleanAddresses.length} selecionadas`;
-            
             if (count === 0) disableActionsOnly();
             else if (isValidCurrentState()) enableActions();
         }
 
         function isValidCurrentState() {
-            if (currentMode === 'manual') return true;
-            const start = parseInt(rangeStart.value);
-            return !isNaN(start) && (allowRepetition.checked || !db || start > lastGeneratedLpn);
+            if (currentMode !== 'range') return true;
+            return !isNaN(Number(rangeStartInput.value)) && (allowRepetition.checked || !checkOverlap());
         }
 
         window.toggleLabelIdx = (idx) => {
-            if (selectedIndices.has(idx)) selectedIndices.delete(idx);
-            else selectedIndices.add(idx);
-            renderChecklist();
-            updatePreview();
+            if (selectedIndices.has(idx)) selectedIndices.delete(idx); else selectedIndices.add(idx);
+            renderChecklist(); updatePreview();
         };
 
-        selectAllBtn.onclick = () => {
-            selectedIndices = new Set(cleanAddresses.keys());
-            renderChecklist();
-            updatePreview();
+        const renderHistory = () => {
+            if (historyData.length === 0) { historyTableBody.innerHTML = ''; historyEmptyMsg.classList.remove('hidden'); return; }
+            historyEmptyMsg.classList.add('hidden');
+            const sorted = [...historyData].sort((a,b) => b.timestamp - a.timestamp);
+            historyTableBody.innerHTML = sorted.map(item => `
+                <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                    <td class="p-4"><span class="px-2 py-0.5 rounded text-[9px] font-black uppercase ${item.source === 'GLP' ? 'bg-indigo-100 text-indigo-700' : 'bg-green-100 text-green-700'}">${item.source}</span></td>
+                    <td class="p-4 font-bold text-slate-900">${item.prefix || '--'}</td>
+                    <td class="p-4 font-mono text-slate-500">${item.start} → ${item.end}</td>
+                    <td class="p-4 text-slate-400 font-medium">${new Date(item.timestamp).toLocaleDateString()}</td>
+                    <td class="p-4 text-center">
+                        <button onclick="window.deleteHistoryItem('${item.id}')" class="p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all">
+                             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
         };
-
-        deselectAllBtn.onclick = () => {
-            selectedIndices.clear();
-            renderChecklist();
-            updatePreview();
-        };
-
-        searchInput.oninput = renderChecklist;
-
-        function enableActions() {
-            if (selectedIndices.size === 0) return;
-            generateBtn.disabled = false; printBtn.disabled = false;
-            generateBtn.classList.replace('bg-slate-400', 'bg-slate-600');
-            printBtn.classList.replace('bg-slate-400', 'bg-blue-600');
-        }
-
-        function disableActionsOnly() {
-            generateBtn.disabled = true; printBtn.disabled = true;
-            generateBtn.classList.replace('bg-slate-600', 'bg-slate-400');
-            printBtn.classList.replace('bg-blue-600', 'bg-slate-400');
-        }
-
-        function disableAll() {
-            disableActionsOnly();
-            document.getElementById('selectionSection').classList.add('disabled-section');
-            document.getElementById('configSection').classList.add('disabled-section');
-            labelsChecklist.innerHTML = "";
-        }
-
-        function showFeedback(msg, type) {
-            const old = document.querySelector('.feedback-banner');
-            if (old) old.remove();
-            const b = document.createElement('div');
-            b.className = `feedback-banner fixed top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white font-bold text-xs shadow-2xl z-[100] transition-all ${type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`;
-            b.textContent = msg;
-            document.body.appendChild(b);
-            setTimeout(() => { if(b.parentNode) b.remove(); }, 3000);
-        }
-
-        function updatePreview() {
-            if (cleanAddresses.length === 0 || selectedIndices.size === 0) {
-                previewContainer.innerHTML = '<p class="text-slate-300 font-bold uppercase text-[10px]">Sem etiquetas selecionadas</p>';
-                return;
-            }
-            
-            const firstIdx = Array.from(selectedIndices).sort((a,b)=>a-b)[0];
-            const addr = cleanAddresses[firstIdx];
-            
-            const w = parseFloat(document.getElementById('labelWidth').value) || 100;
-            const h = parseFloat(document.getElementById('labelHeight').value) || 50;
-            const qrS = parseFloat(document.getElementById('qrSizeInput').value) || 30;
-            const marg = parseFloat(document.getElementById('labelMargin').value) || 3;
-            const gap = parseFloat(document.getElementById('qrTextGap').value) || 5;
-            const fs = parseFloat(document.getElementById('maxFontSize').value) || 100;
-            const arrLen = parseFloat(document.getElementById('arrowSize').value) || 15;
-            const arrThick = parseFloat(document.getElementById('arrowThickness').value) || 1.5;
-            const textArrGap = parseFloat(document.getElementById('textArrowGap').value) || 3;
-
-            const resolvedDir = resolveArrowDirection(addr);
-
-            const availableWidth = previewWrapper.clientWidth - 40;
-            const scale = Math.min(availableWidth / w, 4);
-
-            previewContainer.style.width = `${w * scale}px`;
-            previewContainer.style.height = `${h * scale}px`;
-            previewContainer.style.padding = `${marg * scale}px`;
-            previewContainer.innerHTML = '';
-
-            const inner = document.createElement('div');
-            inner.style.cssText = `width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center;`;
-            
-            const qrZone = document.createElement('div');
-            qrZone.className = "zone-indicator";
-            qrZone.style.width = `${qrS * scale}px`;
-            qrZone.style.height = `${qrS * scale}px`;
-            
-            const textContentZone = document.createElement('div');
-            textContentZone.style.cssText = `display:flex; flex-direction:column; align-items:center; justify-content:center; margin-top:${gap * scale}px;`;
-
-            const textZone = document.createElement('div');
-            textZone.style.cssText = `font-weight:bold; text-align:center; font-size:${(fs * scale) / 5}px; line-height:1;`;
-            textZone.textContent = addr;
-            textContentZone.appendChild(textZone);
-
-            if (resolvedDir !== 'none') {
-                const arrowSpacer = document.createElement('div');
-                arrowSpacer.style.height = `${textArrGap * scale}px`;
-                textContentZone.appendChild(arrowSpacer);
-
-                const arrowSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-                arrowSvg.setAttribute("width", (arrLen * scale).toString());
-                arrowSvg.setAttribute("height", (arrThick * 6 * scale).toString());
-                const midY = arrThick * 3 * scale;
-                const headSize = arrThick * 3 * scale;
-                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-                const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
-
-                if (resolvedDir === 'right') {
-                    line.setAttribute("x1", "0");
-                    line.setAttribute("x2", (arrLen * scale - headSize).toString());
-                    head.setAttribute("points", `${arrLen * scale},${midY} ${(arrLen * scale) - headSize},${midY - headSize/1.5} ${(arrLen * scale) - headSize},${midY + headSize/1.5}`);
-                } else {
-                    line.setAttribute("x1", headSize.toString());
-                    line.setAttribute("x2", (arrLen * scale).toString());
-                    head.setAttribute("points", `0,${midY} ${headSize},${midY - headSize/1.5} ${headSize},${midY + headSize/1.5}`);
-                }
-                line.setAttribute("y1", midY.toString()); line.setAttribute("y2", midY.toString());
-                line.setAttribute("stroke", "black"); line.setAttribute("stroke-width", (arrThick * scale).toString());
-                head.setAttribute("fill", "black");
-                arrowSvg.appendChild(line); arrowSvg.appendChild(head);
-                textContentZone.appendChild(arrowSvg);
-            }
-
-            inner.appendChild(qrZone);
-            inner.appendChild(textContentZone);
-            previewContainer.appendChild(inner);
-            new QRCode(qrZone, { text: addr, width: qrS * scale, height: qrS * scale });
-            document.getElementById('labelDimensions').textContent = `${w}x${h} mm`;
-        }
 
         async function processOutput(mode) {
             if (selectedIndices.size === 0) return;
             statusBox.classList.remove('hidden');
-            const w = parseFloat(document.getElementById('labelWidth').value);
-            const h = parseFloat(document.getElementById('labelHeight').value);
-            const qrS = parseFloat(document.getElementById('qrSizeInput').value);
-            const marg = parseFloat(document.getElementById('labelMargin').value);
-            const gap = parseFloat(document.getElementById('qrTextGap').value);
-            const fsMax = parseFloat(document.getElementById('maxFontSize').value);
-            const arrLen = parseFloat(document.getElementById('arrowSize').value);
-            const arrThick = parseFloat(document.getElementById('arrowThickness').value);
-            const textArrGap = parseFloat(document.getElementById('textArrowGap').value);
+            const config = {
+                w: Number(document.getElementById('labelWidth').value),
+                h: Number(document.getElementById('labelHeight').value),
+                qrS: Number(document.getElementById('qrSizeInput').value),
+                marg: Number(document.getElementById('labelMargin').value),
+                gap: Number(document.getElementById('qrTextGap').value),
+                fsMax: Number(document.getElementById('maxFontSize').value),
+                arrLen: Number(document.getElementById('arrowSize').value),
+                arrThick: Number(document.getElementById('arrowThickness').value),
+                textArrGap: Number(document.getElementById('textArrowGap').value),
+                arrPos: arrowPosition.value
+            };
             const targets = Array.from(selectedIndices).sort((a,b)=>a-b).map(idx => cleanAddresses[idx]);
 
             try {
-                const docPdf = new jsPDF({ orientation: w > h ? 'l' : 'p', unit: 'mm', format: [w, h], compress: true });
+                const docPdf = new jsPDF({ orientation: config.w > config.h ? 'l' : 'p', unit: 'mm', format: [config.w, config.h], compress: true });
                 for (let i = 0; i < targets.length; i++) {
                     const addr = targets[i];
-                    if (i > 0) docPdf.addPage([w, h], w > h ? 'l' : 'p');
+                    if (i > 0) docPdf.addPage([config.w, config.h], config.w > config.h ? 'l' : 'p');
                     const qrImg = await createQRImage(addr, 400);
-                    const qrY = marg;
-                    if (qrImg) docPdf.addImage(qrImg, 'PNG', (w/2)-(qrS/2), qrY, qrS, qrS);
                     const resolvedDir = resolveArrowDirection(addr);
-                    const contentAreaY = qrY + qrS + gap;
-                    const contentAreaH = h - contentAreaY - marg;
-                    docPdf.setFont("Helvetica", "bold");
-                    docPdf.setFontSize(fsMax);
-                    let tw = docPdf.getTextWidth(addr);
-                    let finalFs = fsMax;
-                    if (tw > (w - marg*2)) finalFs *= (w - marg*2) / tw;
-                    let textH = finalFs * 0.3527; 
-                    const arrowSpace = (resolvedDir !== 'none') ? (arrThick + textArrGap) : 0;
-                    const blockH = textH + arrowSpace;
-                    if (blockH > contentAreaH) {
-                        const adjust = contentAreaH / blockH;
-                        finalFs *= adjust;
-                        textH = finalFs * 0.3527;
-                    }
-                    docPdf.setFontSize(finalFs);
-                    const totalH = textH + arrowSpace;
-                    const startY = contentAreaY + (contentAreaH / 2) - (totalH / 2);
-                    docPdf.text(addr, w/2, startY + (textH * 0.85), { align: 'center' });
+                    docPdf.setFont("Helvetica", "bold"); docPdf.setFontSize(config.fsMax);
+                    let tw = docPdf.getTextWidth(addr); let finalFs = config.fsMax; let textH = finalFs * 0.3527;
+                    const isVertArrow = (resolvedDir === 'up' || resolvedDir === 'down');
+                    const isSideArrow = (config.arrPos === 'right' && resolvedDir !== 'none');
+                    let groupW = Math.max(config.qrS, tw); if (isSideArrow) groupW += config.textArrGap + config.arrLen;
+                    const maxAllowedW = config.w - config.marg * 2;
+                    if (groupW > maxAllowedW) { const factor = maxAllowedW / groupW; finalFs *= factor; tw *= factor; textH *= factor; }
+                    let groupH = config.qrS + config.gap + textH; if (config.arrPos === 'below' && resolvedDir !== 'none') groupH += config.textArrGap + (isVertArrow ? config.arrLen : config.arrThick);
+                    const maxAllowedH = config.h - config.marg * 2;
+                    if (groupH > maxAllowedH) { const factor = maxAllowedH / groupH; finalFs *= factor; tw *= factor; textH *= factor; }
+                    docPdf.setFontSize(finalFs); textH = finalFs * 0.3527; tw = docPdf.getTextWidth(addr);
+                    let finalGroupW = isSideArrow ? (Math.max(config.qrS, tw) + config.textArrGap + config.arrLen) : Math.max(config.qrS, tw);
+                    let finalGroupH = (config.qrS + config.gap + textH); if (config.arrPos === 'below' && resolvedDir !== 'none') finalGroupH += config.textArrGap + (isVertArrow ? config.arrLen : config.arrThick);
+                    const startX = (config.w / 2) - (finalGroupW / 2); const startY = (config.h / 2) - (finalGroupH / 2);
+                    const contentW = isSideArrow ? Math.max(config.qrS, tw) : finalGroupW;
+                    const qrX = startX + (contentW / 2) - (config.qrS / 2); const qrY = startY;
+                    if (qrImg) docPdf.addImage(qrImg, 'PNG', qrX, qrY, config.qrS, config.qrS);
+                    const textX = startX + (contentW / 2); const textY = qrY + config.qrS + config.gap + (textH * 0.82);
+                    docPdf.text(addr, textX, textY, { align: 'center' });
                     if (resolvedDir !== 'none') {
-                        const arrowY = startY + textH + textArrGap + (arrThick / 2);
-                        const centerX = w / 2;
-                        const headL = arrThick * 2.5;
-                        const headW = arrThick * 1.5;
-                        docPdf.setLineWidth(arrThick);
-                        docPdf.setDrawColor(0);
-                        docPdf.setFillColor(0);
-                        if (resolvedDir === 'right') {
-                            docPdf.line(centerX - (arrLen/2), arrowY, centerX + (arrLen/2) - headL, arrowY);
-                            docPdf.triangle(centerX + (arrLen/2), arrowY, centerX + (arrLen/2) - headL, arrowY - headW, centerX + (arrLen/2) - headL, arrowY + headW, 'FD');
+                        docPdf.setLineWidth(config.arrThick); docPdf.setDrawColor(0); docPdf.setFillColor(0);
+                        let ax, ay;
+                        if (config.arrPos === 'below') {
+                            ax = textX; ay = textY + config.textArrGap + (isVertArrow ? 0 : config.arrThick/2);
+                            if (!isVertArrow) {
+                                const hl = config.arrThick * 2.5; const hw = config.arrThick * 1.5; const lx = ax - (config.arrLen/2); const rx = ax + (config.arrLen/2);
+                                if (resolvedDir === 'right') { docPdf.line(lx, ay, rx - hl, ay); docPdf.triangle(rx, ay, rx-hl, ay-hw, rx-hl, ay+hw, 'FD'); }
+                                else { docPdf.line(lx + hl, ay, rx, ay); docPdf.triangle(lx, ay, lx+hl, ay-hw, lx+hl, ay+hw, 'FD'); }
+                            } else {
+                                const hl = config.arrThick * 2.5; const hw = config.arrThick * 1.5; const uy = ay; const dy = ay + config.arrLen;
+                                if (resolvedDir === 'up') { docPdf.line(ax, dy, ax, uy + hl); docPdf.triangle(ax, uy, ax-hw, uy+hl, ax+hw, uy+hl, 'FD'); }
+                                else { docPdf.line(ax, uy, ax, dy - hl); docPdf.triangle(ax, dy, ax-hw, dy-hl, ax+hw, dy-hl, 'FD'); }
+                            }
                         } else {
-                            docPdf.line(centerX - (arrLen/2) + headL, arrowY, centerX + (arrLen/2), arrowY);
-                            docPdf.triangle(centerX - (arrLen/2), arrowY, centerX - (arrLen/2) + headL, arrowY - headW, centerX - (arrLen/2) + headL, arrowY + headW, 'FD');
+                            ax = startX + contentW + config.textArrGap + (config.arrLen / 2); ay = config.h / 2;
+                            if (!isVertArrow) {
+                                const hl = config.arrThick * 2.5; const hw = config.arrThick * 1.5; const lx = ax - (config.arrLen/2); const rx = ax + (config.arrLen/2);
+                                if (resolvedDir === 'right') { docPdf.line(lx, ay, rx - hl, ay); docPdf.triangle(rx, ay, rx-hl, ay-hw, rx-hl, ay+hw, 'FD'); }
+                                else { docPdf.line(lx + hl, ay, rx, ay); docPdf.triangle(lx, ay, lx+hl, ay-hw, lx+hl, ay+hw, 'FD'); }
+                            } else {
+                                const hl = config.arrThick * 2.5; const hw = config.arrThick * 1.5; const uy = ay - (config.arrLen/2); const dy = ay + (config.arrLen/2);
+                                if (resolvedDir === 'up') { docPdf.line(ax, dy, ax, uy + hl); docPdf.triangle(ax, uy, ax-hw, uy+hl, ax+hw, uy+hl, 'FD'); }
+                                else { docPdf.line(ax, uy, ax, dy - hl); docPdf.triangle(ax, dy, ax-hw, dy-hl, ax+hw, dy-hl, 'FD'); }
+                            }
                         }
                     }
-                    if (i % 25 === 0) {
-                        statusMessage.textContent = `Processando: ${i+1}/${targets.length}`;
-                        await new Promise(r => setTimeout(r, 1));
-                    }
+                    if (i % 25 === 0) { statusMessage.textContent = `A processar: ${i+1}/${targets.length}`; await new Promise(r => setTimeout(r, 1)); }
                 }
-
-                // Salva o último intervalo e ID na cloud
-                if (db && currentMode === 'range') {
-                    const startVal = rangeStart.value;
-                    const endNum = parseInt(rangeEnd.value);
-                    const currentRange = `${startVal}-${rangeEnd.value}`;
-                    await updateLastLpn(endNum, currentRange);
+                if (db && user && currentMode === 'range') {
+                    const endNum = Number(rangeEndInput.value);
+                    const rangeStr = `${rangePrefix.value}${rangeStartInput.value}-${rangePrefix.value}${rangeEndInput.value}`;
+                    await updateLastLpn(endNum, rangeStr);
+                    await saveRangeToHistory();
                 }
-
-                if (mode === 'download') docPdf.save(`LPNs_${Date.now()}.pdf`);
+                if (mode === 'download') docPdf.save(`Etiquetas_${Date.now()}.pdf`);
                 else {
                     const url = URL.createObjectURL(docPdf.output('blob'));
-                    document.getElementById('printFrame').src = url;
-                    document.getElementById('printModal').classList.add('active');
+                    document.getElementById('printFrame').src = url; document.getElementById('printModal').classList.add('active');
                 }
-            } catch (err) { console.error(err); showFeedback("Erro ao gerar PDF", "error"); } 
+            } catch (err) { console.error(err); showFeedback("Erro ao gerar PDF.", "error"); } 
             finally { statusBox.classList.add('hidden'); }
         }
 
         function createQRImage(text, size) {
             return new Promise(res => {
-                const div = document.createElement('div');
-                div.style.position = 'absolute'; div.style.left = '-9999px';
-                document.body.appendChild(div);
+                const div = document.createElement('div'); div.style.position = 'absolute'; div.style.left = '-9999px'; document.body.appendChild(div);
                 new QRCode(div, { text, width: size, height: size });
-                setTimeout(() => {
-                    const img = div.querySelector('img');
-                    res(img ? img.src : div.querySelector('canvas')?.toDataURL());
-                    document.body.removeChild(div);
-                }, 150);
+                setTimeout(() => { const img = div.querySelector('img'); res(img ? img.src : div.querySelector('canvas')?.toDataURL()); document.body.removeChild(div); }, 150);
             });
         }
 
-        // Eventos
-        document.getElementById('btnModeRange').onclick = () => {
-            currentMode = 'range';
-            document.getElementById('btnModeRange').classList.add('active');
-            document.getElementById('btnModeManual').classList.remove('active');
-            document.getElementById('rangeInputContainer').classList.remove('hidden');
-            document.getElementById('manualInputContainer').classList.add('hidden');
-            syncData();
-        };
-
-        document.getElementById('btnModeManual').onclick = () => {
-            currentMode = 'manual';
-            document.getElementById('btnModeManual').classList.add('active');
-            document.getElementById('btnModeRange').classList.remove('active');
-            document.getElementById('manualInputContainer').classList.remove('hidden');
-            document.getElementById('rangeInputContainer').classList.add('hidden');
-            syncData();
-        };
-
-        const elements = [rangePrefix, rangeStart, rangeEnd, allowRepetition, 
-                          document.getElementById('manualText'), document.getElementById('manualQty'), 
-                          document.getElementById('labelWidth'), document.getElementById('labelHeight'), 
-                          document.getElementById('qrSizeInput'), document.getElementById('labelMargin'), 
-                          document.getElementById('qrTextGap'), document.getElementById('maxFontSize'),
-                          document.getElementById('arrowType'), document.getElementById('arrowSize'),
-                          document.getElementById('arrowThickness'), document.getElementById('textArrowGap')];
-        
-        elements.forEach(el => {
-            if (el) {
-                el.addEventListener('input', syncData);
-                el.addEventListener('change', syncData);
+        function resolveArrowDirection(addr) {
+            if (!addr) return 'none';
+            const firstChar = addr.charAt(0).toUpperCase();
+            const numbers = addr.match(/\d+/g);
+            const levelNum = numbers ? Number(numbers[0]) : 0; 
+            if (letterRules[firstChar]) {
+                const rule = (levelNum % 2 !== 0) ? letterRules[firstChar].odd : letterRules[firstChar].even;
+                if (rule !== 'global') return rule;
             }
-        });
+            return document.getElementById('arrowType').value;
+        }
 
+        function showFeedback(msg, type) {
+            const old = document.querySelector('.feedback-banner'); if (old) old.remove();
+            const b = document.createElement('div');
+            b.className = `feedback-banner fixed top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-xl text-white font-bold text-xs shadow-2xl z-[100] transition-all ${type === 'error' ? 'bg-red-600' : 'bg-blue-600'}`;
+            b.textContent = msg; document.body.appendChild(b);
+            setTimeout(() => { if(b.parentNode) b.remove(); }, 3500);
+        }
+
+        function enableActions() { 
+            generateBtn.disabled = false; printBtn.disabled = false; btnSaveRange.disabled = false;
+            generateBtn.classList.replace('bg-slate-400', 'bg-slate-600'); printBtn.classList.replace('bg-slate-400', 'bg-blue-600'); 
+        }
+        function disableActionsOnly() { 
+            generateBtn.disabled = true; printBtn.disabled = true; btnSaveRange.disabled = true;
+            generateBtn.classList.replace('bg-slate-600', 'bg-slate-400'); printBtn.classList.replace('bg-blue-600', 'bg-slate-400'); 
+        }
+        function disableAll() { disableActionsOnly(); document.getElementById('selectionSection').classList.add('disabled-section'); document.getElementById('configSection').classList.add('disabled-section'); labelsChecklist.innerHTML = ""; }
+
+        btnModeRange.onclick = () => { currentMode = 'range'; [btnModeRange, btnModeManual, btnModeFile].forEach(b => b.classList.remove('active')); btnModeRange.classList.add('active'); rangeInputContainer.classList.remove('hidden'); manualInputContainer.classList.add('hidden'); fileInputContainer.classList.add('hidden'); colSelectWrapper.classList.add('hidden'); syncData(); };
+        btnModeManual.onclick = () => { currentMode = 'manual'; [btnModeRange, btnModeManual, btnModeFile].forEach(b => b.classList.remove('active')); btnModeManual.classList.add('active'); manualInputContainer.classList.remove('hidden'); rangeInputContainer.classList.add('hidden'); fileInputContainer.classList.add('hidden'); colSelectWrapper.classList.add('hidden'); syncData(); };
+        btnModeFile.onclick = () => { currentMode = 'file'; [btnModeRange, btnModeManual, btnModeFile].forEach(b => b.classList.remove('active')); btnModeFile.classList.add('active'); fileInputContainer.classList.remove('hidden'); rangeInputContainer.classList.add('hidden'); manualInputContainer.classList.add('hidden'); colSelectWrapper.classList.remove('hidden'); syncData(); };
+        selectAllBtn.onclick = () => { selectedIndices = new Set(cleanAddresses.keys()); renderChecklist(); updatePreview(); };
+        deselectAllBtn.onclick = () => { selectedIndices.clear(); renderChecklist(); updatePreview(); };
+        searchInput.oninput = renderChecklist;
+        btnSaveRange.onclick = async () => { if (isValidCurrentState()) await saveRangeToHistory(); };
+        fileInput.addEventListener('change', handleFileUpload);
+        columnSelect.addEventListener('change', syncData);
+        const els = [rangeSource, rangePrefix, rangeDigits, rangeStartInput, rangeEndInput, allowRepetition, document.getElementById('manualText'), document.getElementById('manualQty'), document.getElementById('labelWidth'), document.getElementById('labelHeight'), document.getElementById('qrSizeInput'), document.getElementById('labelMargin'), document.getElementById('qrTextGap'), document.getElementById('maxFontSize'), document.getElementById('arrowType'), document.getElementById('arrowSize'), document.getElementById('arrowThickness'), document.getElementById('textArrowGap'), arrowPosition];
+        els.forEach(el => { if (el) { el.addEventListener('input', syncData); el.addEventListener('change', syncData); } });
         generateBtn.onclick = () => processOutput('download');
         printBtn.onclick = () => processOutput('print');
         document.getElementById('closeModalBtn').onclick = () => document.getElementById('printModal').classList.remove('active');
+        document.getElementById('btnOpenHistory').onclick = () => { renderHistory(); document.getElementById('historyModal').classList.add('active'); };
+        document.getElementById('closeHistoryBtn').onclick = () => document.getElementById('historyModal').classList.remove('active');
 
-        window.onload = () => {
-            initFirebase();
-            initLetterRulesUI();
-            syncData();
-        };
+        window.onload = () => { initFirebase(); };
     </script>
 </body>
 </html>
