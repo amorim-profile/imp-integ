@@ -88,7 +88,7 @@
         <header class="mb-8 border-b border-slate-200 pb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
                 <h1 class="text-2xl md:text-3xl font-bold text-slate-900 font-sans">Gerador de Etiquetas</h1>
-                <p class="text-slate-600 font-sans text-sm">v11.8.3: Formatação de Dígitos</p>
+                <p class="text-slate-600 font-sans text-sm">v11.9: Diferenciação Texto/QR</p>
             </div>
             <div class="flex flex-wrap items-center gap-3">
                 <div id="dbStatus" class="flex items-center gap-1.5 bg-slate-200 px-3 py-1.5 rounded-full text-[9px] font-black uppercase text-slate-500 tracking-tighter">
@@ -174,8 +174,13 @@
                     <!-- Modo Manual -->
                     <div id="manualInputContainer" class="hidden space-y-4">
                         <div>
-                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Descrição</label>
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Descrição (Texto Visível)</label>
                             <input type="text" id="manualText" placeholder="Ex: A.001" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-white font-bold text-slate-900 uppercase">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Conteúdo do QR Code (opcional)</label>
+                            <input type="text" id="manualQRText" placeholder="Deixe vazio para usar a descrição" class="w-full rounded-lg border-slate-300 shadow-sm focus:ring-blue-500 text-sm p-2.5 border bg-slate-50 font-bold text-slate-700">
+                            <p class="text-[8px] text-slate-400 mt-1 italic uppercase font-bold">Se preenchido, o QR será diferente do texto visual.</p>
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-slate-500 mb-1 uppercase tracking-widest">Quantidade</label>
@@ -404,7 +409,7 @@
 
         // Estado Global
         let currentMode = 'range';
-        let cleanAddresses = [];
+        let cleanAddresses = []; // Agora será um array de objetos: { text: string, qr: string }
         let selectedIndices = new Set();
         let workbook = null;
         let sheetDataRaw = [];
@@ -453,7 +458,8 @@
                 return;
             }
             const firstIdx = Array.from(selectedIndices).sort((a,b)=>a-b)[0];
-            const addr = cleanAddresses[firstIdx];
+            const addrObj = cleanAddresses[firstIdx];
+            
             const w = Number(document.getElementById('labelWidth').value) || 100;
             const h = Number(document.getElementById('labelHeight').value) || 50;
             const qrS = Number(document.getElementById('qrSizeInput').value) || 30;
@@ -464,39 +470,51 @@
             const arrThick = Number(document.getElementById('arrowThickness').value) || 1.5;
             const textArrGap = Number(document.getElementById('textArrowGap').value) || 3;
             const arrPos = arrowPosition.value;
-            const resolvedDir = resolveArrowDirection(addr);
+            const resolvedDir = resolveArrowDirection(addrObj.text);
+
             const availableWidth = previewWrapper.clientWidth - 40;
             const scale = Math.min(availableWidth / w, 4);
+
             previewContainer.style.width = `${w * scale}px`;
             previewContainer.style.height = `${h * scale}px`;
             previewContainer.style.padding = `${marg * scale}px`;
             previewContainer.innerHTML = '';
+
             const mainWrapper = document.createElement('div');
             mainWrapper.style.cssText = `width:100%; height:100%; display:flex; flex-direction:${arrPos === 'right' ? 'row' : 'column'}; align-items:center; justify-content:center;`;
+
             const groupContent = document.createElement('div');
             groupContent.style.cssText = `display:flex; flex-direction:${arrPos === 'right' ? 'row' : 'column'}; align-items:center; justify-content:center;`;
+
             const leftBlock = document.createElement('div');
             leftBlock.style.cssText = `display:flex; flex-direction:column; align-items:center; justify-content:center;`;
+            
             const qrZone = document.createElement('div');
             qrZone.className = "zone-indicator";
             qrZone.style.width = `${qrS * scale}px`; qrZone.style.height = `${qrS * scale}px`;
+            
             const textZone = document.createElement('div');
             textZone.style.cssText = `font-weight:bold; text-align:center; font-size:${(fs * scale) / 5}px; line-height:1; margin-top:${gap * scale}px;`;
-            textZone.textContent = addr;
+            textZone.textContent = addrObj.text;
+
             leftBlock.appendChild(qrZone); leftBlock.appendChild(textZone); groupContent.appendChild(leftBlock);
+
             if (resolvedDir !== 'none') {
                 const arrowWrapper = document.createElement('div');
                 arrowWrapper.style.cssText = `display:flex; align-items:center; justify-content:center;`;
                 if (arrPos === 'below') arrowWrapper.style.marginTop = `${textArrGap * scale}px`;
                 else arrowWrapper.style.marginLeft = `${textArrGap * scale}px`;
+
                 const isVertical = resolvedDir === 'up' || resolvedDir === 'down';
                 const svgW = isVertical ? (arrThick * 6 * scale) : (arrLen * scale);
                 const svgH = isVertical ? (arrLen * scale) : (arrThick * 6 * scale);
+
                 const arrowSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
                 arrowSvg.setAttribute("width", svgW.toString()); arrowSvg.setAttribute("height", svgH.toString());
                 const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
                 const head = document.createElementNS("http://www.w3.org/2000/svg", "polygon");
                 const headSize = arrThick * 3 * scale; const midX = svgW / 2; const midY = svgH / 2;
+
                 if (resolvedDir === 'right') {
                     line.setAttribute("x1", "0"); line.setAttribute("x2", (svgW - headSize).toString()); line.setAttribute("y1", midY.toString()); line.setAttribute("y2", midY.toString());
                     head.setAttribute("points", `${svgW},${midY} ${svgW - headSize},${midY - headSize/1.5} ${svgW - headSize},${midY + headSize/1.5}`);
@@ -514,11 +532,11 @@
                 head.setAttribute("fill", "black"); arrowSvg.appendChild(line); arrowSvg.appendChild(head); arrowWrapper.appendChild(arrowSvg); groupContent.appendChild(arrowWrapper);
             }
             mainWrapper.appendChild(groupContent); previewContainer.appendChild(mainWrapper);
-            new QRCode(qrZone, { text: addr, width: qrS * scale, height: qrS * scale });
+            new QRCode(qrZone, { text: addrObj.qr, width: qrS * scale, height: qrS * scale });
             document.getElementById('labelDimensions').textContent = `${w}x${h} mm`;
         }
 
-        // --- FIREBASE INITIALIZATION ---
+        // --- FIREBASE SETUP ---
         const initFirebase = async () => {
             if (!firebaseConfig) {
                 dbStatus.innerHTML = '<span class="w-2 h-2 bg-amber-500 rounded-full"></span> Modo Local';
@@ -570,21 +588,17 @@
             });
         };
 
-        // --- HÍBRIDO: LOCAL STORAGE FALLBACK ---
+        // --- HISTORY LOGIC ---
         function loadLocalHistory() {
             try {
                 const stored = localStorage.getItem(`history_${appId}`);
-                if (stored) {
-                    historyData = JSON.parse(stored);
-                    renderHistory();
-                }
+                if (stored) { historyData = JSON.parse(stored); renderHistory(); }
             } catch (e) { console.error("Local Load Error:", e); }
         }
 
         function saveLocalHistory() {
-            try {
-                localStorage.setItem(`history_${appId}`, JSON.stringify(historyData));
-            } catch (e) { console.error("Local Save Error:", e); }
+            try { localStorage.setItem(`history_${appId}`, JSON.stringify(historyData)); }
+            catch (e) { console.error("Local Save Error:", e); }
         }
 
         async function saveRangeToHistory() {
@@ -609,9 +623,7 @@
                 } catch (e) { showFeedback("Erro ao gravar na Nuvem.", "error"); }
             } else {
                 historyData.push({ id: 'local_' + Date.now(), ...newEntry });
-                saveLocalHistory();
-                renderHistory();
-                syncData();
+                saveLocalHistory(); renderHistory(); syncData();
                 showFeedback("Intervalo registado Localmente.", "success");
             }
         }
@@ -625,14 +637,12 @@
                 } catch (e) { showFeedback("Erro ao remover.", "error"); }
             } else {
                 historyData = historyData.filter(item => item.id !== id);
-                saveLocalHistory();
-                renderHistory();
-                syncData();
+                saveLocalHistory(); renderHistory(); syncData();
                 showFeedback("Registo local removido.", "success");
             }
         };
 
-        // --- LOGIC ---
+        // --- CORE LOGIC ---
         function checkOverlap() {
             if (currentMode !== 'range' || allowRepetition.checked) return null;
             const source = rangeSource.value;
@@ -692,18 +702,24 @@
                     isValid = true;
                     if (checkOverlap()) conflictFound = true;
                     cleanAddresses = Array.from({ length: end - start + 1 }, (_, i) => {
-                        const numStr = (start + i).toString().padStart(digits, '0');
-                        return String(prefix + numStr);
+                        const val = (start + i).toString().padStart(digits, '0');
+                        const fullStr = String(prefix + val);
+                        return { text: fullStr, qr: fullStr };
                     });
                 } else { cleanAddresses = []; }
             } else if (currentMode === 'manual') {
                 const text = document.getElementById('manualText').value.trim().toUpperCase() || "A.001";
+                const qrText = document.getElementById('manualQRText').value.trim() || text;
                 const qty = Number(document.getElementById('manualQty').value) || 1;
-                cleanAddresses = Array(qty).fill(text); isValid = true; 
+                cleanAddresses = Array(qty).fill(null).map(() => ({ text, qr: qrText }));
+                isValid = true; 
             } else if (currentMode === 'file') {
                 if (sheetDataRaw.length > 0) {
                     const selCol = columnSelect.value;
-                    cleanAddresses = sheetDataRaw.map(row => String(row[selCol] || "").trim().toUpperCase()).filter(v => v !== "");
+                    cleanAddresses = sheetDataRaw.map(row => {
+                        const val = String(row[selCol] || "").trim().toUpperCase();
+                        return { text: val, qr: val };
+                    }).filter(obj => obj.text !== "");
                     isValid = cleanAddresses.length > 0;
                 } else { cleanAddresses = []; }
             }
@@ -725,12 +741,15 @@
         function renderChecklist() {
             const filter = searchInput.value.toLowerCase();
             labelsChecklist.innerHTML = cleanAddresses
-                .map((addr, idx) => ({ addr, idx }))
-                .filter(item => item.addr.toLowerCase().includes(filter))
+                .map((obj, idx) => ({ obj, idx }))
+                .filter(item => item.obj.text.toLowerCase().includes(filter))
                 .map(item => `
                     <div class="flex items-center p-2 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-colors" onclick="window.toggleLabelIdx(${item.idx})">
                         <input type="checkbox" class="mr-3 w-4 h-4 pointer-events-none" ${selectedIndices.has(item.idx) ? 'checked' : ''}>
-                        <span class="truncate font-bold text-slate-700">${item.addr}</span>
+                        <div class="flex flex-col overflow-hidden">
+                            <span class="truncate font-bold text-slate-700">${item.obj.text}</span>
+                            ${item.obj.qr !== item.obj.text ? `<span class="text-[8px] text-blue-500 font-bold uppercase truncate">QR: ${item.obj.qr}</span>` : ''}
+                        </div>
                     </div>
                 `).join('');
             const count = selectedIndices.size;
@@ -768,6 +787,7 @@
             `).join('');
         };
 
+        // --- PDF GENERATION ---
         async function processOutput(mode) {
             if (selectedIndices.size === 0) return;
             statusBox.classList.remove('hidden');
@@ -788,12 +808,12 @@
             try {
                 const docPdf = new jsPDF({ orientation: config.w > config.h ? 'l' : 'p', unit: 'mm', format: [config.w, config.h], compress: true });
                 for (let i = 0; i < targets.length; i++) {
-                    const addr = targets[i];
+                    const addrObj = targets[i];
                     if (i > 0) docPdf.addPage([config.w, config.h], config.w > config.h ? 'l' : 'p');
-                    const qrImg = await createQRImage(addr, 400);
-                    const resolvedDir = resolveArrowDirection(addr);
+                    const qrImg = await createQRImage(addrObj.qr, 400);
+                    const resolvedDir = resolveArrowDirection(addrObj.text);
                     docPdf.setFont("Helvetica", "bold"); docPdf.setFontSize(config.fsMax);
-                    let tw = docPdf.getTextWidth(addr); let finalFs = config.fsMax; let textH = finalFs * 0.3527;
+                    let tw = docPdf.getTextWidth(addrObj.text); let finalFs = config.fsMax; let textH = finalFs * 0.3527;
                     const isVertArrow = (resolvedDir === 'up' || resolvedDir === 'down');
                     const isSideArrow = (config.arrPos === 'right' && resolvedDir !== 'none');
                     let groupW = Math.max(config.qrS, tw); if (isSideArrow) groupW += config.textArrGap + config.arrLen;
@@ -802,7 +822,7 @@
                     let groupH = config.qrS + config.gap + textH; if (config.arrPos === 'below' && resolvedDir !== 'none') groupH += config.textArrGap + (isVertArrow ? config.arrLen : config.arrThick);
                     const maxAllowedH = config.h - config.marg * 2;
                     if (groupH > maxAllowedH) { const factor = maxAllowedH / groupH; finalFs *= factor; tw *= factor; textH *= factor; }
-                    docPdf.setFontSize(finalFs); textH = finalFs * 0.3527; tw = docPdf.getTextWidth(addr);
+                    docPdf.setFontSize(finalFs); textH = finalFs * 0.3527; tw = docPdf.getTextWidth(addrObj.text);
                     let finalGroupW = isSideArrow ? (Math.max(config.qrS, tw) + config.textArrGap + config.arrLen) : Math.max(config.qrS, tw);
                     let finalGroupH = (config.qrS + config.gap + textH); if (config.arrPos === 'below' && resolvedDir !== 'none') finalGroupH += config.textArrGap + (isVertArrow ? config.arrLen : config.arrThick);
                     const startX = (config.w / 2) - (finalGroupW / 2); const startY = (config.h / 2) - (finalGroupH / 2);
@@ -810,7 +830,7 @@
                     const qrX = startX + (contentW / 2) - (config.qrS / 2); const qrY = startY;
                     if (qrImg) docPdf.addImage(qrImg, 'PNG', qrX, qrY, config.qrS, config.qrS);
                     const textX = startX + (contentW / 2); const textY = qrY + config.qrS + config.gap + (textH * 0.82);
-                    docPdf.text(addr, textX, textY, { align: 'center' });
+                    docPdf.text(addrObj.text, textX, textY, { align: 'center' });
                     if (resolvedDir !== 'none') {
                         docPdf.setLineWidth(config.arrThick); docPdf.setDrawColor(0); docPdf.setFillColor(0);
                         let ax, ay;
@@ -828,7 +848,7 @@
                         } else {
                             ax = startX + contentW + config.textArrGap + (config.arrLen / 2); ay = config.h / 2;
                             if (!isVertArrow) {
-                                const hl = config.arrThick * 2.5; const hw = config.arrThick * 1.5; const lx = ax - (config.arrLen/2); const rx = ax + (config.arrLen/2);
+                                const hl = config.arrThick * 2.5; const hw = config.arrThick * 1.5; const lx = ax - (arrLen/2); const rx = ax + (arrLen/2);
                                 if (resolvedDir === 'right') { docPdf.line(lx, ay, rx - hl, ay); docPdf.triangle(rx, ay, rx-hl, ay-hw, rx-hl, ay+hw, 'FD'); }
                                 else { docPdf.line(lx + hl, ay, rx, ay); docPdf.triangle(lx, ay, lx+hl, ay-hw, lx+hl, ay+hw, 'FD'); }
                             } else {
@@ -855,6 +875,7 @@
             finally { statusBox.classList.add('hidden'); }
         }
 
+        // --- HELPERS ---
         function createQRImage(text, size) {
             return new Promise(res => {
                 const div = document.createElement('div'); div.style.position = 'absolute'; div.style.left = '-9999px'; document.body.appendChild(div);
@@ -902,8 +923,10 @@
         btnSaveRange.onclick = async () => { if (isValidCurrentState()) await saveRangeToHistory(); };
         fileInput.addEventListener('change', handleFileUpload);
         columnSelect.addEventListener('change', syncData);
-        const els = [rangeSource, rangePrefix, rangeDigits, rangeStartInput, rangeEndInput, allowRepetition, document.getElementById('manualText'), document.getElementById('manualQty'), document.getElementById('labelWidth'), document.getElementById('labelHeight'), document.getElementById('qrSizeInput'), document.getElementById('labelMargin'), document.getElementById('qrTextGap'), document.getElementById('maxFontSize'), document.getElementById('arrowType'), document.getElementById('arrowSize'), document.getElementById('arrowThickness'), document.getElementById('textArrowGap'), arrowPosition];
+        
+        const els = [rangeSource, rangePrefix, rangeDigits, rangeStartInput, rangeEndInput, allowRepetition, document.getElementById('manualText'), document.getElementById('manualQRText'), document.getElementById('manualQty'), document.getElementById('labelWidth'), document.getElementById('labelHeight'), document.getElementById('qrSizeInput'), document.getElementById('labelMargin'), document.getElementById('qrTextGap'), document.getElementById('maxFontSize'), document.getElementById('arrowType'), document.getElementById('arrowSize'), document.getElementById('arrowThickness'), document.getElementById('textArrowGap'), arrowPosition];
         els.forEach(el => { if (el) { el.addEventListener('input', syncData); el.addEventListener('change', syncData); } });
+        
         generateBtn.onclick = () => processOutput('download');
         printBtn.onclick = () => processOutput('print');
         document.getElementById('closeModalBtn').onclick = () => document.getElementById('printModal').classList.remove('active');
